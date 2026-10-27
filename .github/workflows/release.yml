@@ -7,6 +7,12 @@ on:
       - 'custom_components/haos_openai_extension/**'
       - 'tests/**'
       - '.github/workflows/release.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'custom_components/haos_openai_extension/**'
+      - 'tests/**'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
@@ -33,6 +39,7 @@ jobs:
           fi
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
       - name: Publish release if version is new
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}

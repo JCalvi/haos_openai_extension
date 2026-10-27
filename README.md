@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**Experimental v0.1.5** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**Experimental v0.1.6** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The first feature, `haos_openai_extension__get_history`, reads state transitions from Home Assistant's Recorder history.
 
@@ -33,6 +33,56 @@ If there is no history tool call:
 ## Existing YAML installations
 
 Versions up to v0.1.2 required a `haos_openai_extension:` entry in `configuration.yaml`. Starting in v0.1.3 the integration is configured entirely through the UI. New installations do not require YAML. If you previously configured it in YAML, remove that old line when migrating to the UI-based setup.
+
+## Faster voice history and reliable durations (v0.1.6)
+
+The original `haos_openai_extension__get_history` tool remains available.
+Its original parameters (`name`, `entity_id`, `hours`, `state`) still work.
+The tool now calculates durations and calendar boundaries inside Home Assistant
+instead of asking the LLM to do clock arithmetic.
+
+| Natural question | What the tool returns |
+| --- | --- |
+| When was the garage door last closed? | Latest actual on → off transition |
+| How long has the garage door been closed? | Difference between the last actual closing and the **current HA time** |
+| How long was it open last time? | Latest completed on-state interval |
+| How many times did it open yesterday? | Number of actual transitions to on during local yesterday |
+| How long was it open yesterday? | Total observed on-state duration within yesterday |
+| List each opening from last week | Full transition history when available within the 10-day limit |
+
+**Compact by default:** `detail=summary` returns the event count, most recent
+events by state and calculated durations, but omits the full list of timestamps.
+The model can request `detail=recent` (five newest events) or
+`detail=full` (up to **80 events**, unchanged from previous versions).
+This reduces token usage and Alexa response payloads **without discarding
+stored history** or weakening event counts.
+
+New optional parameters:
+- `period`: `today`, `yesterday`, `this_week`, `last_week`,
+  `last_night`, `last_hour`, `last_24_hours`, `last_7_days`,
+  `last_10_days`. Weeks start Monday; *last night* means 6 pm yesterday
+  to 6 am today in Home Assistant's timezone.
+- `start_time` and `end_time`: custom ISO 8601 date/time boundaries.
+  Datetimes without timezone offsets are interpreted in Home Assistant's
+  configured timezone.
+- `detail`: `summary` (default), `recent`, `full`.
+- `max_events`: maximum returned timestamp entries (1–80) for
+  `recent` / `full`. The count always covers all matching events.
+
+The range is rejected (rather than silently shortened) if its start is more
+than 240 hours before the request, or if it requires future history. Rolling
+hour windows are computed in UTC for DST accuracy; calendar boundaries use
+the local timezone.
+
+**History quality:** Recorder may include repeated `off` records during a
+restart. Those are not counted as new closings. `unknown` and `unavailable`
+are not treated as opening/closing events. If the device was unavailable during
+a measured duration, the tool flags the uncertainty. Durations are based on
+recorded observations, not proof that the device stayed unchanged while offline.
+
+**Security:** The history tool remains read-only and only queries entities
+exposed to Assist. Continue exposing only `binary_sensor.garage_door_input`,
+never the actual garage cover or a script that can actuate it.
 
 ## Capabilities and safety
 
@@ -74,7 +124,7 @@ Home Assistant 2026.3+ uses in-repository brand images automatically; some HACS 
 
 ## Current limitations
 
-- Counts cover only observed state transitions in the requested time window. If Recorder does not contain a previous valid state, the first reading cannot be counted as an event.
+- Counts cover only observed state transitions in the requested time window. If Recorder does not contain a previous valid state, the first reading cannot be counted as an event. Completed intervals spanning missing history can be unknown or uncertain.
 - Detailed history is typically retained for 10 days by default unless configured otherwise.
 - Alexa's synchronous response deadline is short; slow LLM + Recorder queries may time out.
 - This build has been checked against Home Assistant's current LLM and Recorder source API but **has not been runtime-tested on your HAOS installation**.

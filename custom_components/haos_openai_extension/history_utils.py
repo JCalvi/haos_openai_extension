@@ -81,3 +81,32 @@ def summarize_transitions(
         ],
         "truncated": len(matching) > max_events,
     }
+
+
+def shape_history_detail(summary: dict, detail: str, max_events: int) -> dict:
+    """Return smaller tool results without changing computed history/counts.
+
+    summary is the full result produced by summarize_transitions. Only the
+    outbound event listing is shortened. The 'full' mode preserves the
+    original up-to-80-event capability.
+    """
+    result = dict(summary)
+    if detail == "summary":
+        result.pop("events_newest_first", None)
+        result.pop("truncated", None)
+    elif detail == "recent":
+        limit = min(max_events, 5)
+        result["events_newest_first"] = (
+            result["events_newest_first"][:limit]
+        )
+        result["truncated"] = result["matching_transitions"] > limit
+    elif detail == "full":
+        result["events_newest_first"] = (
+            result["events_newest_first"][:max_events]
+        )
+        result["truncated"] = (
+            result["matching_transitions"] > max_events
+        )
+    else:
+        raise ValueError("detail must be summary, recent or full")
+    return result
