@@ -20,6 +20,7 @@ from homeassistant.helpers.llm import (
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+from .history_utils import summarize_transitions
 
 _LOGGER = logging.getLogger(__name__)
 MAX_HOURS = 240
@@ -74,6 +75,9 @@ class HistoryTool(Tool):
         "by friendly name (name) or exact entity_id. Use hours up to 240. "
         "The optional state filter must be a raw state such as on/off, or "
         "open/closed only for binary sensors with an appropriate door class. "
+        "The tool explicitly returns the latest matching transition, "
+        "and the latest occurrence of each raw state. Use those values "
+        "instead of selecting a timestamp from a list. "
         "For binary sensors of class power, on/off describes power, NOT "
         "whether a door is open or closed."
     )
@@ -152,19 +156,24 @@ class HistoryTool(Tool):
                 error=True,
             )
 
-        events = []
+        # Recorder returns the history in chronological order, but never
+        # depend on an LLM deciding which entry is most recent. Sort by
+        # absolute timestamps and include an explicit latest matching event.
+        transitions = []
         for item in records.get(entity.entity_id, []):
             if item.state in {"unknown", "unavailable"}:
                 continue
-            if state_filter is not None and item.state.casefold() != state_filter:
-                continue
             changed_at = item.last_changed or item.last_updated
-            events.append(
+            transitions.append(
                 {
                     "state": item.state,
                     "time": dt_util.as_local(changed_at).isoformat(),
+                    "sort_time": changed_at.timestamp(),
                 }
             )
+
+        summary = summarize_transitions(transitions, state_filter, MAX_EVENTS)
+        last_by_state = summary["latest_by_raw_state"]
 
         semantic_warning = None
         if entity.domain == "binary_sensor" and device_class not in OPENING_CLASSES:
@@ -173,24 +182,36 @@ class HistoryTool(Tool):
                 "on/off with open/closed without confirming the wiring."
             )
 
-        return ToolResult(
-            data={
-                "entity_id": entity.entity_id,
-                "name": entity.name,
-                "device_class": device_class,
-                "start": dt_util.as_local(start).isoformat(),
-                "end": dt_util.as_local(end).isoformat(),
-                "state_filter": state_filter,
-                "matching_transitions": len(events),
-                "events": events[-MAX_EVENTS:],
-                "truncated": len(events) > MAX_EVENTS,
-                "semantic_warning": semantic_warning,
-                "note": (
-                    "Only recorded transitions in the requested interval are "
-                    "included. No result does not prove an event never happened."
-                ),
-            }
-        )
+        result = {
+            "source_entity_id": entity.entity_id,
+            "source_name": entity.name,
+            "device_class": device_class,
+            "period_start": dt_util.as_local(start).isoformat(),
+            "period_end": dt_util.as_local(end).isoformat(),
+            "state_filter": state_filter,
+            "current_state": entity.state,
+            "current_state_since": dt_util.as_local(entity.last_changed).isoformat(),
+            **summary,
+            "semantic_warning": semantic_warning,
+            "note": (
+                "Use latest_matching_transition.time for questions about the "
+                "most recent occurrence of the requested state. Entries are "
+                "ordered newest first, not oldest first. When no filter was "
+                "specified, use latest_by_raw_state for the relevant state. "
+                "Recorder history is limited to the requested period. The "
+                "entity shown in source_entity_id is the source of these "
+                "timestamps; it may differ from the device/cover history."
+            ),
+        }
+        if entity.domain == "binary_sensor" and device_class in OPENING_CLASSES:
+            result["last_opened_at"] = (
+                last_by_state.get("on", {}).get("time")
+            )
+            result["last_closed_at"] = (
+                last_by_state.get("off", {}).get("time")
+            )
+
+        return ToolResult(data=result)
 
 
 @callback
@@ -206,7 +227,12 @@ def async_get_tools(
             "When asked about the last time a device changed state or its "
             "past activity, call haos_openai_extension__get_history, using "
             "the entity friendly name if its entity_id is unknown. "
-            "Never invent history or assume that a power-class binary sensor "
-            "indicates an open or closed door. Times are already local."
+            "For the MOST RECENT opening/closing/on/off request, use the "
+            "latest_matching_transition or last_opened_at/last_closed_at "
+            "from the history tool; NEVER pick an older entry from its "
+            "events_newest_first list. Check source_entity_id matches the "
+            "intended sensor. Never invent history or assume that a "
+            "power-class binary sensor indicates an open or closed door. "
+            "Times are already local."
         ),
     )
