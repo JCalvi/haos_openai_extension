@@ -260,6 +260,17 @@ class ToolContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("light.secret", str(response.data))
         self.assertNotIn("cover.garage", str(response.data))
 
+    async def test_comparison_explicit_hours_is_rolling_window(self):
+        tool = llm_module.CompareHistoryTool()
+        response = await tool.async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "domain": "light", "hours": 4
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(response.data["period_name"], "last_4_hours")
+        self.assertEqual(self.hass.recorder.calls, 1)
+
     async def test_comparison_over_limit_fails_before_recorder(self):
         tool = llm_module.CompareHistoryTool()
         response = await tool.async_call(
