@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'custom_components/haos_openai_extension/**'
+      - 'tests/**'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
