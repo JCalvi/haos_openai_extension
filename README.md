@@ -51,7 +51,7 @@ The model can request `detail=recent` (five newest events) or
 This reduces token usage and Alexa response payloads **without discarding
 stored history** or weakening event counts.
 
-New optional parameters:
+History query parameters:
 - `period`: `today`, `yesterday`, `this_week`, `last_week`,
   `last_night`, `last_hour`, `last_24_hours`, `last_7_days`,
   `last_10_days`. Weeks start Monday; *last night* means 6 pm yesterday
