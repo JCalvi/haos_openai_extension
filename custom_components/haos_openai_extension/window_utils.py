@@ -53,17 +53,24 @@ def resolve_history_window(
     today = local_now.date()
     midnight = _day_at(today, 0, tz)
 
+    def subtract_elapsed_hours(anchor: datetime, number: int) -> datetime:
+        # For rolling windows, subtract in UTC rather than wall-clock time:
+        # a daylight-saving change must not make 240 h become 239/241 h.
+        return (
+            anchor.astimezone(timezone.utc) - timedelta(hours=number)
+        ).astimezone(tz)
+
     if start_time is not None or end_time is not None:
         end = _parse_time(end_time, tz) if end_time is not None else now
         start = (
             _parse_time(start_time, tz)
             if start_time is not None
-            else end - timedelta(hours=hours)
+            else subtract_elapsed_hours(end, hours)
         )
         label = "custom"
     elif period is None:
         end = now
-        start = now - timedelta(hours=hours)
+        start = subtract_elapsed_hours(now, hours)
         label = f"last_{hours}_hours"
     else:
         label = period.strip().lower().replace(" ", "_")
@@ -91,7 +98,7 @@ def resolve_history_window(
                 "last_7_days": 168,
                 "last_10_days": 240,
             }[label]
-            start = now - timedelta(hours=period_hours)
+            start = subtract_elapsed_hours(now, period_hours)
             end = now
         else:
             raise ValueError(
