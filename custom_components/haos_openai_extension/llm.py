@@ -41,19 +41,17 @@ def _resolve_entity(
         return None, "Provide an entity_id or a friendly name"
 
     query = name.casefold().strip()
-    candidates = [
-        entity
-        for entity in hass.states.async_all()
-        if async_should_expose(hass, assistant, entity.entity_id)
-    ]
+    candidates = hass.states.async_all()
     matches = [
         entity for entity in candidates
-        if entity.name.casefold() == query or entity.entity_id.casefold() == query
+        if (entity.name.casefold() == query or entity.entity_id.casefold() == query)
+        and async_should_expose(hass, assistant, entity.entity_id)
     ]
     if not matches:
         matches = [
             entity for entity in candidates
             if query in entity.name.casefold()
+            and async_should_expose(hass, assistant, entity.entity_id)
         ]
     if not matches:
         return None, "No matching entity exposed to Assist"
