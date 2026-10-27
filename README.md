@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**Experimental v0.1.6** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**v1.0.0** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The first feature, `haos_openai_extension__get_history`, reads state transitions from Home Assistant's Recorder history.
 
@@ -34,7 +34,7 @@ If there is no history tool call:
 
 Versions up to v0.1.2 required a `haos_openai_extension:` entry in `configuration.yaml`. Starting in v0.1.3 the integration is configured entirely through the UI. New installations do not require YAML. If you previously configured it in YAML, remove that old line when migrating to the UI-based setup.
 
-## Faster voice history and reliable durations (v0.1.6)
+## Faster voice history and reliable durations (v1.0.0)
 
 The original `haos_openai_extension__get_history` tool remains available.
 Its original parameters (`name`, `entity_id`, `hours`, `state`) still work.
@@ -127,8 +127,8 @@ Home Assistant 2026.3+ uses in-repository brand images automatically; some HACS 
 - Counts cover only observed state transitions in the requested time window. If Recorder does not contain a previous valid state, the first reading cannot be counted as an event. Completed intervals spanning missing history can be unknown or uncertain.
 - Detailed history is typically retained for 10 days by default unless configured otherwise.
 - Alexa's synchronous response deadline is short; slow LLM + Recorder queries may time out.
-- This build has been checked against Home Assistant's current LLM and Recorder source API but **has not been runtime-tested on your HAOS installation**.
+- The existing history capability has been tested with your Home Assistant setup; the new duration and range features have passed automated tests but should still be verified end-to-end on your installation.
 
 ## Releases
 
-A GitHub Actions workflow automatically creates a release tag (for example `v0.1.1`) whenever the `version` in `custom_components/haos_openai_extension/manifest.json` is increased on the `main` branch. No manual release creation is required.
+Development is committed directly to `main` (no feature branches or pull requests). GitHub Actions runs syntax checks and regression tests after each qualifying change. When the `version` in `custom_components/haos_openai_extension/manifest.json` changes (for example, to `1.0.1`), the workflow automatically publishes a matching GitHub release (`v1.0.1`) only if the checks pass.
