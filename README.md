@@ -2,7 +2,7 @@
 
 **v1.0.0** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
-The first feature, `haos_openai_extension__get_history`, reads state transitions from Home Assistant's Recorder history.
+The `haos_openai_extension__get_history` tool reads state transitions from Home Assistant's Recorder history.
 
 ## Install with HACS
 
@@ -30,16 +30,10 @@ If there is no history tool call:
 - Confirm HACS downloaded the current release, restart, and start a *new conversation* in Assist.
 - Ensure the target entity is exposed under **Settings → Voice assistants → Expose → Assist**.
 
-## Existing YAML installations
+## History, durations and time ranges
 
-Versions up to v0.1.2 required a `haos_openai_extension:` entry in `configuration.yaml`. Starting in v0.1.3 the integration is configured entirely through the UI. New installations do not require YAML. If you previously configured it in YAML, remove that old line when migrating to the UI-based setup.
-
-## Faster voice history and reliable durations (v1.0.0)
-
-The original `haos_openai_extension__get_history` tool remains available.
-Its original parameters (`name`, `entity_id`, `hours`, `state`) still work.
-The tool now calculates durations and calendar boundaries inside Home Assistant
-instead of asking the LLM to do clock arithmetic.
+The `haos_openai_extension__get_history` tool calculates state changes, elapsed durations
+and calendar boundaries inside Home Assistant instead of asking the LLM to do clock arithmetic.
 
 | Natural question | What the tool returns |
 | --- | --- |
@@ -53,7 +47,7 @@ instead of asking the LLM to do clock arithmetic.
 **Compact by default:** `detail=summary` returns the event count, most recent
 events by state and calculated durations, but omits the full list of timestamps.
 The model can request `detail=recent` (five newest events) or
-`detail=full` (up to **80 events**, unchanged from previous versions).
+`detail=full` (up to **80 events**).
 This reduces token usage and Alexa response payloads **without discarding
 stored history** or weakening event counts.
 
@@ -122,7 +116,7 @@ The OpenAI-inspired / smart-home icon is bundled at
 `custom_components/haos_openai_extension/brand/icon.png`.
 Home Assistant 2026.3+ uses in-repository brand images automatically; some HACS builds may still display a placeholder in their own repository list.
 
-## Current limitations
+## Limitations
 
 - Counts cover only observed state transitions in the requested time window. If Recorder does not contain a previous valid state, the first reading cannot be counted as an event. Completed intervals spanning missing history can be unknown or uncertain.
 - Detailed history is typically retained for 10 days by default unless configured otherwise.
