@@ -1,13 +1,14 @@
-"""Read-only Recorder history tool contributed to the existing Assist LLM API."""
+"""Read-only Recorder history tools for the existing Assist LLM API."""
+
 from datetime import timedelta
+import logging
 
 import probatio
 
 from homeassistant.components import llm
-from homeassistant.components.recorder import history
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import intent
+from homeassistant.components.homeassistant import async_should_expose
+from homeassistant.components.recorder import get_instance, history
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers.llm import (
     LLM_API_ASSIST,
     LLMContext,
@@ -20,107 +21,194 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
 MAX_HOURS = 240
 MAX_EVENTS = 80
+OPENING_CLASSES = {"door", "garage_door", "opening", "window"}
+
+
+def _resolve_entity(
+    hass: HomeAssistant, assistant: str, entity_id: str | None, name: str | None
+) -> tuple[State | None, str | None]:
+    """Resolve an entity strictly from currently exposed states."""
+    if entity_id:
+        entity = hass.states.get(entity_id)
+        if entity is None or not async_should_expose(hass, assistant, entity_id):
+            return None, "Entity not found or not exposed to Assist"
+        return entity, None
+
+    if not name or not name.strip():
+        return None, "Provide an entity_id or a friendly name"
+
+    query = name.casefold().strip()
+    candidates = [
+        entity
+        for entity in hass.states.async_all()
+        if async_should_expose(hass, assistant, entity.entity_id)
+    ]
+    matches = [
+        entity for entity in candidates
+        if entity.name.casefold() == query or entity.entity_id.casefold() == query
+    ]
+    if not matches:
+        matches = [
+            entity for entity in candidates
+            if query in entity.name.casefold()
+        ]
+    if not matches:
+        return None, "No matching entity exposed to Assist"
+    if len(matches) > 1:
+        choices = ", ".join(entity.entity_id for entity in matches[:8])
+        return None, f"Ambiguous name; specify entity_id. Matches: {choices}"
+    return matches[0], None
 
 
 class HistoryTool(Tool):
-    """Read recent state transitions for an Assist-exposed entity."""
+    """Read significant state changes for an exposed entity."""
 
     name = "haos_openai_extension__get_history"
-    title = "Get entity state history"
+    title = "Get Home Assistant state history"
     integration = DOMAIN
     description = (
-        "Retrieve recorded state changes for an entity exposed to Assist. "
-        "Use when asked when a door last opened or closed, a device turned on "
-        "or off, or how many times a state occurred. "
-        "The optional state is an exact raw state, such as on or off. "
-        "Search at most 240 hours. Use the exact entity_id from Assist."
+        "Read historical state transitions from Recorder for an Assist-exposed "
+        "Home Assistant entity. Call for 'when was X last opened/closed/on/off', "
+        "'how many times', or 'what happened yesterday'. Identify the entity "
+        "by friendly name (name) or exact entity_id. Use hours up to 240. "
+        "The optional state filter must be a raw state such as on/off, or "
+        "open/closed only for binary sensors with an appropriate door class. "
+        "For binary sensors of class power, on/off describes power, NOT "
+        "whether a door is open or closed."
     )
     annotations = ToolAnnotations(
         read_only=True, destructive=False, idempotent=True, open_world=False
     )
-    parameters = probatio.Schema({
-        "entity_id": str,
-        probatio.Optional("hours", default=24): int,
-        probatio.Optional("state"): str,
-    })
+    parameters = probatio.Schema(
+        {
+            probatio.Optional("name"): str,
+            probatio.Optional("entity_id"): str,
+            probatio.Optional("hours", default=240): int,
+            probatio.Optional("state"): str,
+        }
+    )
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: ToolInput, llm_context: LLMContext
     ) -> ToolResult:
-        """Query Recorder without granting the model SQL or control access."""
+        """Return a bounded set of read-only history events."""
         args = self.parameters(tool_input.tool_args)
-        entity_id = args["entity_id"]
         hours = args["hours"]
-        state_filter = args.get("state")
         if isinstance(hours, bool) or not 1 <= hours <= MAX_HOURS:
-            raise HomeAssistantError("hours must be between 1 and 240")
-        if not llm_context.assistant or not intent.async_entity_exposed(
-            hass, llm_context.assistant, entity_id
-        ):
-            raise HomeAssistantError("Entity is not exposed to this Assist assistant")
+            return ToolResult(data={"error": "hours must be 1 to 240"}, error=True)
+
+        entity, error = _resolve_entity(
+            hass,
+            llm_context.assistant,
+            args.get("entity_id"),
+            args.get("name"),
+        )
+        if error or entity is None:
+            return ToolResult(data={"error": error or "Entity not found"}, error=True)
+
+        requested_state = args.get("state")
+        device_class = entity.attributes.get("device_class")
+        state_filter = requested_state.casefold().strip() if requested_state else None
+        if entity.domain == "binary_sensor" and state_filter in {
+            "open", "opened", "close", "closed"
+        }:
+            if device_class not in OPENING_CLASSES:
+                return ToolResult(
+                    data={
+                        "error": (
+                            f"{entity.entity_id} has device_class={device_class!r}, "
+                            "so open/closed cannot be inferred. Query raw on/off "
+                            "transitions and confirm their physical meaning first."
+                        )
+                    },
+                    error=True,
+                )
+            state_filter = (
+                "on" if state_filter in {"open", "opened"} else "off"
+            )
 
         end = dt_util.utcnow()
         start = end - timedelta(hours=hours)
-        records = await hass.async_add_executor_job(
-            lambda: history.get_significant_states(
-                hass, start, end, entity_ids=[entity_id],
-                significant_changes_only=False, minimal_response=False,
-                no_attributes=True,
+        try:
+            # Use Recorder's executor (not the HA event loop) for database I/O.
+            # Do not include the start-time snapshot: it may predate the window.
+            records = await get_instance(hass).async_add_executor_job(
+                history.get_significant_states,
+                hass,
+                start,
+                end,
+                [entity.entity_id],
+                None,   # filters
+                False,  # include_start_time_state
+                True,   # significant_changes_only
+                False,  # minimal_response
+                True,   # no_attributes
             )
-        )
-        states = records.get(entity_id, [])
-        events = []
-        previous = None
-        for index, item in enumerate(states):
-            state = item.state
-            if state in ("unknown", "unavailable"):
-                previous = state
-                continue
-            # Recorder may prepend the state already active at the start.
-            # Never claim that first record is a transition.
-            if index == 0:
-                previous = state
-                continue
-            if state == previous:
-                continue
-            previous = state
-            if state_filter is not None and state != state_filter:
-                continue
-            timestamp = item.last_changed or item.last_updated
-            events.append({
-                "state": state,
-                "time": dt_util.as_local(timestamp).isoformat(),
-            })
+        except Exception:
+            _LOGGER.exception("Recorder history request failed")
+            return ToolResult(
+                data={"error": "Recorder history query failed; check HA logs"},
+                error=True,
+            )
 
-        return ToolResult(data={
-            "entity_id": entity_id,
-            "period_hours": hours,
-            "state_filter": state_filter,
-            "matching_transitions": len(events),
-            "events": events[-MAX_EVENTS:],
-            "truncated": len(events) > MAX_EVENTS,
-            "note": (
-                "The initial state is excluded because it may predate the search. "
-                "Only recorded changes within the selected period are included. "
-                "Missing records do not prove that an event never happened."
-            ),
-        })
+        events = []
+        for item in records.get(entity.entity_id, []):
+            if item.state in {"unknown", "unavailable"}:
+                continue
+            if state_filter is not None and item.state.casefold() != state_filter:
+                continue
+            changed_at = item.last_changed or item.last_updated
+            events.append(
+                {
+                    "state": item.state,
+                    "time": dt_util.as_local(changed_at).isoformat(),
+                }
+            )
+
+        semantic_warning = None
+        if entity.domain == "binary_sensor" and device_class not in OPENING_CLASSES:
+            semantic_warning = (
+                f"The entity has device_class={device_class!r}. Do not equate "
+                "on/off with open/closed without confirming the wiring."
+            )
+
+        return ToolResult(
+            data={
+                "entity_id": entity.entity_id,
+                "name": entity.name,
+                "device_class": device_class,
+                "start": dt_util.as_local(start).isoformat(),
+                "end": dt_util.as_local(end).isoformat(),
+                "state_filter": state_filter,
+                "matching_transitions": len(events),
+                "events": events[-MAX_EVENTS:],
+                "truncated": len(events) > MAX_EVENTS,
+                "semantic_warning": semantic_warning,
+                "note": (
+                    "Only recorded transitions in the requested interval are "
+                    "included. No result does not prove an event never happened."
+                ),
+            }
+        )
 
 
 @callback
 def async_get_tools(
     hass: HomeAssistant, llm_context: LLMContext, api_id: str
 ) -> llm.LLMTools | None:
-    """Contribute the tool to the existing Assist device-control API."""
+    """Contribute history lookups directly to the existing Assist API."""
     if api_id != LLM_API_ASSIST:
         return None
     return llm.LLMTools(
         tools=[HistoryTool()],
         prompt=(
-            "For questions about previous states or event times, use "
-            "haos_openai_extension__get_history. Never invent timestamps. "
-            "State when Recorder does not contain enough history."
+            "When asked about the last time a device changed state or its "
+            "past activity, call haos_openai_extension__get_history, using "
+            "the entity friendly name if its entity_id is unknown. "
+            "Never invent history or assume that a power-class binary sensor "
+            "indicates an open or closed door. Times are already local."
         ),
     )
