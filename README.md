@@ -1,8 +1,8 @@
 # HAOS OpenAI Extension
 
-**v1.0.0** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**v1.0.1** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
-The `haos_openai_extension__get_history` tool reads state transitions from Home Assistant's Recorder history.
+The integration provides read-only Recorder history and cross-entity comparison tools: `haos_openai_extension__get_history` and `haos_openai_extension__compare_history`.
 
 ## Install with HACS
 
@@ -23,12 +23,59 @@ In Home Assistant Assist, using your existing OpenAI agent, ask:
 
 In the OpenAI conversation trace (**Show details**), look for a call to `haos_openai_extension__get_history`. A call only to `homeassistant__GetLiveContext` does not query history.
 
+To test batching, ask **"Which light was on for the longest time today?"**.
+The trace should show a single `haos_openai_extension__compare_history`
+call, rather than repeated `get_history` calls for each light.
+
 If there is no history tool call:
 
 - Confirm **HAOS OpenAI Extension** appears as configured under **Settings → Devices & services** (rather than only in HACS).
 - Check **Settings → System → Logs** for `HAOS OpenAI Extension enabled: Recorder history for Assist`.
 - Confirm HACS downloaded the current release, restart, and start a *new conversation* in Assist.
 - Ensure the target entity is exposed under **Settings → Voice assistants → Expose → Assist**.
+
+## Fast cross-entity comparisons
+
+Ask naturally, for example:
+
+- **"Which light was on for the longest time today?"** — one Recorder query compares the total recorded on-time for all Assist-exposed lights, returning a ranked top five.
+- **"Which switch was switched on most often yesterday?"** — ranks observed transitions to `on`.
+- **"Which climate unit spent longest in cool mode yesterday?"** — compares the selected climate state `cool`. This is **not a compressor-runtime measurement**.
+
+The `haos_openai_extension__compare_history` tool accepts `domain`, `state`
+(default `on`), `metric` (`total_duration` or `transition_count`),
+`period` or ISO date ranges, and optional `name_contains` filtering.
+It returns the top five results by default (up to ten). A comparison normally
+permits up to 30 matching entities, configurable per query to a hard maximum
+of 40.
+
+**The query is read-only and checks Assist exposure for every entity before
+accessing Recorder.** If more devices match than the allowed limit, it returns
+an error rather than presenting an incomplete result as definitive. Missing
+history and unavailable periods are identified through coverage flags, so
+results with incomplete coverage are described as *observed* rather than
+definitively the longest.
+
+## Targeted last-event lookups
+
+When the question is only **"When was X last opened/closed/turned on?"**,
+the single-entity history tool supports `query_mode=latest`. It searches
+the most recent 12 hours first, then 48 hours, then 240 hours if needed,
+stopping as soon as a genuine matching state transition is found.
+It does not mistake repeated same-state readings after restarts for events.
+
+For durations, precise time ranges, counts, detailed history or historical
+comparison, the original `query_mode=complete` remains the default. Full
+history results and up to 80 detailed events are still available; these
+optimisations do not change the recorded data or reduce query coverage.
+
+## Performance diagnostics
+
+At DEBUG log level, the integration reports Recorder query time, overall tool
+execution time, number of entities requested and approximate response size.
+It does **not** log entity IDs, entity names, state histories, prompts,
+credentials or access-control information. DEBUG logging is not required for
+normal use and there is no background polling or caching.
 
 ## History, durations and time ranges
 
