@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**Experimental v0.1.3** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**Experimental v0.1.4** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The first feature, `haos_openai_extension__get_history`, reads state transitions from Home Assistant's Recorder history.
 
@@ -39,6 +39,9 @@ Versions up to v0.1.2 required a `haos_openai_extension:` entry in `configuratio
 - Query by **friendly name** (e.g. `Garage Door Input`) or **entity ID**.
 - Retrieve recorded changes within up to **240 hours (10 days)**, with at most 80 events in the returned result.
 - Optional filtering by raw state such as `on` or `off`.
+- Recorded events are sorted **newest-first**, with explicit `latest_matching_transition`, `latest_by_raw_state`, and (for opening-class binary sensors) `last_opened_at` and `last_closed_at` fields.
+- `unknown` and `unavailable` states are omitted from returned history and last-event summaries; invalid current readings are not exposed as current-state values.
+- The history response identifies its `source_entity_id` so the answer can be checked against the correct entity history (for example, a garage-door binary sensor rather than the cover).
 - For `binary_sensor` with device class `door`, `garage_door`, `opening` or `window`, `open` and `closed` can be translated to `on`/`off`.
 - For `device_class: power`, **off means no power detected**, not necessarily a closed door. Check sensor wiring and select the correct device class before asking about open/closed events.
 - Only entities exposed to the active Assist assistant may be queried.
