@@ -75,9 +75,10 @@ class HistoryTool(Tool):
         "by friendly name (name) or exact entity_id. Use hours up to 240. "
         "The optional state filter must be a raw state such as on/off, or "
         "open/closed only for binary sensors with an appropriate door class. "
-        "The tool explicitly returns the latest matching transition, "
-        "and the latest occurrence of each raw state. Use those values "
-        "instead of selecting a timestamp from a list. "
+        "The tool excludes repeated identical-state recordings, including "
+        "state restoration after a restart. It returns the latest REAL "
+        "observed state transition, not the most recent Recorder row. Use "
+        "latest_matching_transition or last_closed_at/last_opened_at. "
         "For binary sensors of class power, on/off describes power, NOT "
         "whether a door is open or closed."
     )
@@ -141,7 +142,9 @@ class HistoryTool(Tool):
         start = end - timedelta(hours=hours)
         try:
             # Use Recorder's executor (not the HA event loop) for database I/O.
-            # Do not include the start-time snapshot: it may predate the window.
+            # Include the state just before the requested interval when
+            # available, to establish a baseline without counting it as
+            # an event.
             records = await get_instance(hass).async_add_executor_job(
                 history.get_significant_states,
                 hass,
@@ -149,7 +152,7 @@ class HistoryTool(Tool):
                 end,
                 [entity.entity_id],
                 None,   # filters
-                False,  # include_start_time_state
+                True,   # include_start_time_state (baseline for comparisons)
                 True,   # significant_changes_only
                 False,  # minimal_response
                 True,   # no_attributes
@@ -161,23 +164,26 @@ class HistoryTool(Tool):
                 error=True,
             )
 
-        # Recorder returns the history in chronological order, but never
-        # depend on an LLM deciding which entry is most recent. Sort by
-        # absolute timestamps and include an explicit latest matching event.
-        transitions = []
+        # Recorder rows are state observations, not necessarily state
+        # transitions. Duplicate off/off readings (including after a
+        # restart) MUST NOT count as additional garage-door closings.
+        observations = []
         for item in records.get(entity.entity_id, []):
-            if item.state in {"unknown", "unavailable"}:
-                continue
             changed_at = item.last_changed or item.last_updated
-            transitions.append(
+            observations.append(
                 {
                     "state": item.state,
                     "time": dt_util.as_local(changed_at).isoformat(),
-                    "sort_time": changed_at.timestamp(),
+                    "sort_time": item.last_updated.timestamp(),
                 }
             )
 
-        summary = summarize_transitions(transitions, state_filter, MAX_EVENTS)
+        summary = summarize_transitions(
+            observations,
+            state_filter,
+            MAX_EVENTS,
+            start_timestamp=start.timestamp(),
+        )
         last_by_state = summary["latest_by_raw_state"]
 
         semantic_warning = None
@@ -198,20 +204,17 @@ class HistoryTool(Tool):
             "semantic_warning": semantic_warning,
             "note": (
                 "Use latest_matching_transition.time for questions about the "
-                "most recent occurrence of the requested state. Entries are "
-                "ordered newest first, not oldest first. When no filter was "
-                "specified, use latest_by_raw_state for the relevant state. "
-                "Recorder history is limited to the requested period. The "
-                "entity shown in source_entity_id is the source of these "
-                "timestamps; it may differ from the device/cover history. "
-                "Unknown or unavailable readings are omitted."
+                "most recent genuine observed transition to the requested "
+                "state. Events are ordered newest first. Duplicate same-state "
+                "observations (such as off after a restart) are NOT transitions. "
+                "When no filter was specified, use latest_by_raw_state for the "
+                "relevant state. Invalid readings are ignored without resetting "
+                "the previous known state. Recorder history is limited to the "
+                "requested period. source_entity_id identifies the sensor used."
             ),
         }
         if entity.state.casefold() not in {"unknown", "unavailable"}:
             result["current_state"] = entity.state
-            result["current_state_since"] = dt_util.as_local(
-                entity.last_changed
-            ).isoformat()
 
         if entity.domain == "binary_sensor" and device_class in OPENING_CLASSES:
             result["last_opened_at"] = (
