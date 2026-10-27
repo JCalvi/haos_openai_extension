@@ -97,6 +97,28 @@ class WindowTests(unittest.TestCase):
                 start_time="2026-10-27T12:00",
             )
 
+    def test_rolling_240_hours_across_dst_stays_240_hours(self):
+        from datetime import timezone
+        after_dst = datetime(2026, 10, 7, 15, 0, tzinfo=self.zone)
+        start, end, _ = resolve_history_window(after_dst, hours=240)
+        seconds = (
+            end.astimezone(timezone.utc)
+            - start.astimezone(timezone.utc)
+        ).total_seconds()
+        self.assertEqual(seconds, 240 * 3600)
+
+    def test_rolling_seven_days_across_dst_stays_168_hours(self):
+        from datetime import timezone
+        after_dst = datetime(2026, 10, 7, 15, 0, tzinfo=self.zone)
+        start, end, _ = resolve_history_window(
+            after_dst, period="last_7_days"
+        )
+        seconds = (
+            end.astimezone(timezone.utc)
+            - start.astimezone(timezone.utc)
+        ).total_seconds()
+        self.assertEqual(seconds, 168 * 3600)
+
     def test_dst_calendar_day_is_not_assumed_24_hours(self):
         # DST starts in Melbourne on 2026-10-04; 02:00 jumps to 03:00.
         dst_today = datetime(2026, 10, 4, 16, 0, tzinfo=self.zone)
