@@ -421,6 +421,8 @@ class CompareHistoryTool(Tool):
         "to on; climate state cool/heat describes selected HVAC MODE and "
         "does NOT prove compressor runtime. Period defaults to today; "
         "other periods and ISO start_time/end_time match get_history. "
+        "If hours is supplied without period, use a rolling hours window. "
+        "Otherwise period defaults to today. "
         "Results contain up to ten entities ranked deterministically, "
         "and coverage flags. More than max_entities matching entities "
         "returns an error rather than a misleading partial ranking. "
@@ -435,7 +437,7 @@ class CompareHistoryTool(Tool):
         probatio.Optional("state", default="on"): str,
         probatio.Optional("metric", default="total_duration"): str,
         probatio.Optional("period"): str,
-        probatio.Optional("hours", default=24): int,
+        probatio.Optional("hours", default=0): int,
         probatio.Optional("start_time"): str,
         probatio.Optional("end_time"): str,
         probatio.Optional("max_entities", default=30): int,
@@ -451,9 +453,9 @@ class CompareHistoryTool(Tool):
         max_entities = args["max_entities"]
         max_results = args["max_results"]
         hours = args["hours"]
-        if isinstance(hours, bool) or not 1 <= hours <= MAX_HOURS:
+        if isinstance(hours, bool) or not 0 <= hours <= MAX_HOURS:
             return ToolResult(
-                data={"error": "hours must be 1..240"}, error=True
+                data={"error": "hours must be 1..240, or omitted"}, error=True
             )
         domain = args["domain"].strip().casefold()
         raw_state = args["state"].strip().casefold()
@@ -483,12 +485,16 @@ class CompareHistoryTool(Tool):
                     f"max_results must be 1..{MAX_COMPARE_RESULTS}"
                 )
             period = args.get("period")
-            if not (args.get("start_time") or args.get("end_time")):
-                period = period or "today"
+            # No time options means 'today'. Explicit hours with no period
+            # means a rolling lookback instead, e.g. last 4 hours.
+            if not (
+                period or args.get("start_time") or args.get("end_time")
+            ) and hours == 0:
+                period = "today"
             local_now = dt_util.now()
             start_local, end_local, period_name = resolve_history_window(
                 local_now,
-                hours=hours,
+                hours=hours or 24,
                 period=period,
                 start_time=args.get("start_time"),
                 end_time=args.get("end_time"),
