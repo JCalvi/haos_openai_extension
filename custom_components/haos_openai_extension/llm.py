@@ -151,7 +151,9 @@ class HistoryTool(Tool):
         "For ONLY the last opening/closing/on/off event, pass "
         "query_mode=latest to search 12h then 48h then 240h only as "
         "needed. For elapsed/total durations, counts, specific days "
-        "or full histories use query_mode=complete (the default)."
+        "or full histories use query_mode=complete (the default). "
+        "If query_mode=latest is combined with an explicit period, the "
+        "tool automatically uses complete mode for the requested dates."
     )
     annotations = ToolAnnotations(
         read_only=True, destructive=False, idempotent=True, open_world=False
@@ -238,13 +240,10 @@ class HistoryTool(Tool):
         if query_mode == "latest" and (
             args.get("period") or args.get("start_time") or args.get("end_time")
         ):
-            return ToolResult(
-                data={
-                    "error": "For a specific historical period use "
-                    "query_mode=complete, not latest"
-                },
-                error=True,
-            )
+            # The caller has specified an exact period. Use a single query
+            # over that period and preserve its boundaries, rather than
+            # rejecting an otherwise valid request and wasting an LLM retry.
+            query_mode = "complete"
 
         local_now = dt_util.now()
         try:
