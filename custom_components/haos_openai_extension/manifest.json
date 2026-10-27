@@ -8,5 +8,6 @@
     "llm",
     "recorder"
   ],
-  "codeowners": []
+  "codeowners": [],
+  "issue_tracker": "https://github.com/JCalvi/haos_openai_extension/issues"
 }
