@@ -241,6 +241,41 @@ class ToolContractTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_latest_with_last_7_days_uses_one_complete_query(self):
+        """Luna may specify latest and an explicit range together."""
+        tool = llm_module.HistoryTool()
+        response = await tool.async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "entity_id": "light.stove",
+                "period": "last_7_days",
+                "state": "off",
+                "query_mode": "latest",
+                "detail": "summary",
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(self.hass.recorder.calls, 1)
+        self.assertEqual(response.data["period_name"], "last_7_days")
+        self.assertEqual(response.data["detail"], "summary")
+        self.assertIn("matching_transitions", response.data)
+        self.assertNotIn("events_newest_first", response.data)
+        self.assertNotIn("searched_hours", response.data)
+
+    async def test_latest_with_yesterday_never_expands_outside_yesterday(self):
+        tool = llm_module.HistoryTool()
+        response = await tool.async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "entity_id": "light.stove",
+                "period": "yesterday",
+                "state": "off",
+                "query_mode": "latest",
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(response.data["period_name"], "yesterday")
+        self.assertEqual(self.hass.recorder.calls, 1)
+        self.assertIsNone(response.data["latest_matching_transition"])
+
     async def test_comparison_queries_recorder_once_for_exposed_lights(self):
         tool = llm_module.CompareHistoryTool()
         response = await tool.async_call(
