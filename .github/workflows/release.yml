@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python3 -m compileall -q custom_components/haos_openai_extension
       - name: Read integration version
         id: version
         shell: bash
