@@ -1,7 +1,7 @@
 {
   "domain": "haos_openai_extension",
   "name": "HAOS OpenAI Extension",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "documentation": "https://github.com/JCalvi/haos_openai_extension",
   "integration_type": "service",
   "dependencies": [
