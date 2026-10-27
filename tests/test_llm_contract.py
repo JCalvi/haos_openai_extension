@@ -161,8 +161,13 @@ def load_llm_module():
         ),
         "homeassistant.components.llm": make_module(
             "homeassistant.components.llm",
-            LLMTools=lambda tools, prompt: types.SimpleNamespace(
-                tools=tools, prompt=prompt
+            LLMTools=type(
+                "LLMTools", (),
+                {"__init__": lambda self, tools, prompt: (
+                    setattr(self, "tools", tools),
+                    setattr(self, "prompt", prompt),
+                    None,
+                )[-1]}
             ),
         ),
         "homeassistant.components.homeassistant": make_module(
