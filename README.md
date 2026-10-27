@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**v1.0.1** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**v1.0.2** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The integration provides read-only Recorder history and cross-entity comparison tools: `haos_openai_extension__get_history` and `haos_openai_extension__compare_history`.
 
@@ -56,6 +56,14 @@ history and unavailable periods are identified through coverage flags, so
 results with incomplete coverage are described as *observed* rather than
 definitively the longest.
 
+For each incomplete result, `coverage_issues` identifies whether the state
+at the start of the period is unknown (`start_state_unknown`) or Recorder
+contains an unavailable gap (`unavailable_gap`). The response also includes
+`start_state_unknown_entities`, `unavailable_gap_entities`, and, where
+applicable, `initial_unknown_seconds`. An unknown interval is **not**
+automatically treated as off. A ranking with incomplete coverage is therefore
+a ranking of *recorded* usage, not a guarantee about the full day.
+
 ## Targeted last-event lookups
 
 When the question is only **"When was X last opened/closed/turned on?"**,
@@ -64,8 +72,13 @@ the most recent 12 hours first, then 48 hours, then 240 hours if needed,
 stopping as soon as a genuine matching state transition is found.
 It does not mistake repeated same-state readings after restarts for events.
 
+When an explicit `period` or ISO date range is supplied alongside
+`query_mode=latest`, the tool automatically uses a single complete query
+within that exact window instead of returning an error and requiring another
+LLM request.
+
 For durations, precise time ranges, counts, detailed history or historical
-comparison, the original `query_mode=complete` remains the default. Full
+comparison, `query_mode=complete` remains the default. Full
 history results and up to 80 detailed events are still available; these
 optimisations do not change the recorded data or reduce query coverage.
 
