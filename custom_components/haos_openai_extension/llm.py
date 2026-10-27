@@ -114,6 +114,11 @@ class HistoryTool(Tool):
         requested_state = args.get("state")
         device_class = entity.attributes.get("device_class")
         state_filter = requested_state.casefold().strip() if requested_state else None
+        if state_filter in {"unknown", "unavailable"}:
+            return ToolResult(
+                data={"error": "Only meaningful state changes can be queried"},
+                error=True,
+            )
         if entity.domain == "binary_sensor" and state_filter in {
             "open", "opened", "close", "closed"
         }:
@@ -189,8 +194,6 @@ class HistoryTool(Tool):
             "period_start": dt_util.as_local(start).isoformat(),
             "period_end": dt_util.as_local(end).isoformat(),
             "state_filter": state_filter,
-            "current_state": entity.state,
-            "current_state_since": dt_util.as_local(entity.last_changed).isoformat(),
             **summary,
             "semantic_warning": semantic_warning,
             "note": (
@@ -200,9 +203,16 @@ class HistoryTool(Tool):
                 "specified, use latest_by_raw_state for the relevant state. "
                 "Recorder history is limited to the requested period. The "
                 "entity shown in source_entity_id is the source of these "
-                "timestamps; it may differ from the device/cover history."
+                "timestamps; it may differ from the device/cover history. "
+                "Unknown or unavailable readings are omitted."
             ),
         }
+        if entity.state.casefold() not in {"unknown", "unavailable"}:
+            result["current_state"] = entity.state
+            result["current_state_since"] = dt_util.as_local(
+                entity.last_changed
+            ).isoformat()
+
         if entity.domain == "binary_sensor" and device_class in OPENING_CLASSES:
             result["last_opened_at"] = (
                 last_by_state.get("on", {}).get("time")
