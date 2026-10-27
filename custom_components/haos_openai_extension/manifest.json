@@ -1,7 +1,7 @@
 {
   "domain": "haos_openai_extension",
   "name": "HAOS OpenAI Extension",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "documentation": "https://github.com/JCalvi/haos_openai_extension",
   "integration_type": "service",
   "dependencies": [
@@ -9,5 +9,6 @@
     "recorder"
   ],
   "codeowners": [],
-  "issue_tracker": "https://github.com/JCalvi/haos_openai_extension/issues"
+  "issue_tracker": "https://github.com/JCalvi/haos_openai_extension/issues",
+  "config_flow": true
 }
