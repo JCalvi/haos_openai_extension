@@ -50,6 +50,7 @@ def calculate_history_metrics(
     last_transition_gap = False
     had_invalid_gaps = False
     saw_valid_baseline = False
+    first_valid_timestamp: float | None = None
     total_by_state: dict[str, float] = {}
     last_completed: dict[str, dict] = {}
 
@@ -79,6 +80,7 @@ def calculate_history_metrics(
 
         if previous is None:
             previous = state
+            first_valid_timestamp = ts
             saw_valid_baseline = ts <= start_timestamp
             segment_start = max(ts, start_timestamp)
             continue
@@ -114,11 +116,28 @@ def calculate_history_metrics(
         for state, duration in total_by_state.items()
     }
 
+    # A missing start-of-period baseline is not the same as a sensor
+    # being unavailable. Give the caller the unobserved initial duration
+    # instead of silently considering that entire interval 'off'.
+    initial_unknown_seconds = (
+        0 if saw_valid_baseline else round(
+            max(
+                0,
+                min(
+                    end_timestamp,
+                    first_valid_timestamp
+                    if first_valid_timestamp is not None else end_timestamp,
+                ) - start_timestamp,
+            )
+        )
+    )
+
     result = {
         "total_observed_duration_by_raw_state": totals,
         "latest_completed_interval_by_raw_state": last_completed,
         "has_unavailable_gaps": had_invalid_gaps,
         "period_start_state_known": saw_valid_baseline,
+        "initial_unknown_seconds": initial_unknown_seconds,
         "duration_coverage_complete": (
             saw_valid_baseline and not had_invalid_gaps
         ),
