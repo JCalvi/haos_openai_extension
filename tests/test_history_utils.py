@@ -1,7 +1,7 @@
-"""Regression checks for deterministic last-event selection (stdlib only)."""
+"""Regression tests for true Recorder transitions (Python stdlib only)."""
 
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 import importlib.util
 import unittest
 
@@ -18,91 +18,136 @@ spec.loader.exec_module(module)
 summarize_transitions = module.summarize_transitions
 
 
+def sample(state: str, timestamp: str) -> dict:
+    return {
+        "state": state,
+        "time": timestamp,
+        "sort_time": datetime.fromisoformat(timestamp).timestamp(),
+    }
+
+
 class HistorySummaryTests(unittest.TestCase):
+    """Use the actual garage door times reported in the October 27 trace."""
+
     def setUp(self):
-        # Intentionally unsorted: an older 11:48 closing must never win
-        # over the newer 13:18 closing shown in the user's HA history.
-        timestamps = [
-            ("off", "2026-10-27T11:48:11+11:00"),
-            ("off", "2026-10-27T13:18:10+11:00"),
-            ("on", "2026-10-27T13:16:08+11:00"),
-        ]
-        self.events = [
-            {
-                "state": state,
-                "time": timestamp,
-                "sort_time": datetime.fromisoformat(timestamp).timestamp(),
-            }
-            for state, timestamp in timestamps
+        self.baseline = sample("off", "2026-10-26T18:00:00+11:00")
+        self.items = [
+            self.baseline,
+            sample("off", "2026-10-26T19:17:26+11:00"),
+            sample("off", "2026-10-27T09:28:01+11:00"),
+            sample("on", "2026-10-27T10:10:00+11:00"),
+            sample("off", "2026-10-27T10:11:59+11:00"),
+            sample("off", "2026-10-27T11:29:31+11:00"),
+            sample("on", "2026-10-27T11:47:00+11:00"),
+            sample("off", "2026-10-27T11:48:11+11:00"),
+            sample("on", "2026-10-27T13:16:08+11:00"),
+            sample("off", "2026-10-27T13:18:10+11:00"),
+            sample("unknown", "2026-10-27T15:00:00+11:00"),
+            sample("off", "2026-10-27T15:32:19+11:00"),
+            sample("unavailable", "2026-10-27T16:00:00+11:00"),
+            sample("off", "2026-10-27T16:32:20+11:00"),
+            sample("off", "2026-10-27T16:40:07+11:00"),
+            sample("off", "2026-10-27T16:52:39+11:00"),
         ]
 
-    def test_last_closed_is_118pm_not_1148am(self):
-        result = summarize_transitions(self.events, "off", 80)
+    def test_last_closing_is_1318_not_restart_at_1652(self):
+        result = summarize_transitions(self.items, "off", 80)
         self.assertEqual(
             result["latest_matching_transition"]["time"],
             "2026-10-27T13:18:10+11:00",
         )
-        self.assertEqual(result["matching_transitions"], 2)
-        self.assertEqual(result["events_newest_first"][0]["state"], "off")
-
-    def test_unfiltered_has_latest_for_each_raw_state(self):
-        result = summarize_transitions(self.events, None, 80)
+        self.assertEqual(result["matching_transitions"], 3)
         self.assertEqual(
-            result["latest_by_raw_state"]["off"]["time"],
+            [event["time"] for event in result["events_newest_first"]],
+            [
+                "2026-10-27T13:18:10+11:00",
+                "2026-10-27T11:48:11+11:00",
+                "2026-10-27T10:11:59+11:00",
+            ],
+        )
+
+    def test_unfiltered_latest_by_state_only_counts_real_changes(self):
+        result = summarize_transitions(self.items, None, 80)
+        self.assertEqual(result["matching_transitions"], 6)
+        self.assertEqual(result["latest_by_raw_state"]["off"]["time"],
+                         "2026-10-27T13:18:10+11:00")
+        self.assertEqual(result["latest_by_raw_state"]["on"]["time"],
+                         "2026-10-27T13:16:08+11:00")
+        self.assertEqual(
+            [event["state"] for event in result["events_newest_first"]],
+            ["off", "on", "off", "on", "off", "on"],
+        )
+
+    def test_unsorted_recorder_samples_are_still_chronological(self):
+        result = summarize_transitions(list(reversed(self.items)), "off", 80)
+        self.assertEqual(
+            result["latest_matching_transition"]["time"],
             "2026-10-27T13:18:10+11:00",
         )
+
+    def test_invalid_readings_do_not_count_as_events(self):
+        result = summarize_transitions(self.items, None, 80)
+        self.assertNotIn("unknown", result["latest_by_raw_state"])
+        self.assertNotIn("unavailable", result["latest_by_raw_state"])
+        self.assertTrue(all(
+            event["state"] in {"on", "off"}
+            for event in result["events_newest_first"]
+        ))
+
+    def test_same_state_before_and_after_unknown_is_not_a_change(self):
+        result = summarize_transitions([
+            sample("off", "2026-10-27T11:00:00+11:00"),
+            sample("unknown", "2026-10-27T12:00:00+11:00"),
+            sample("unavailable", "2026-10-27T12:10:00+11:00"),
+            sample("off", "2026-10-27T13:00:00+11:00"),
+        ], "off", 80)
+        self.assertEqual(result["matching_transitions"], 0)
+        self.assertIsNone(result["latest_matching_transition"])
+
+    def test_valid_change_after_unavailable_is_detected(self):
+        result = summarize_transitions([
+            sample("off", "2026-10-27T11:00:00+11:00"),
+            sample("unavailable", "2026-10-27T12:00:00+11:00"),
+            sample("on", "2026-10-27T13:00:00+11:00"),
+        ], "on", 80)
+        self.assertEqual(result["matching_transitions"], 1)
+
+    def test_single_first_sample_is_baseline_not_event(self):
+        result = summarize_transitions([
+            sample("off", "2026-10-27T13:00:00+11:00"),
+        ], "off", 80)
+        self.assertIsNone(result["latest_matching_transition"])
+
+    def test_initial_baseline_prior_to_interval_is_not_returned(self):
+        cutoff = datetime.fromisoformat(
+            "2026-10-27T12:00:00+11:00"
+        ).timestamp()
+        result = summarize_transitions(
+            self.items, "off", 80, start_timestamp=cutoff
+        )
+        self.assertEqual(result["matching_transitions"], 1)
         self.assertEqual(
-            result["latest_by_raw_state"]["on"]["time"],
-            "2026-10-27T13:16:08+11:00",
+            result["latest_matching_transition"]["time"],
+            "2026-10-27T13:18:10+11:00",
         )
 
-    def test_empty_history_never_invents_time(self):
-        result = summarize_transitions([], "off", 80)
+    def test_all_invalid_samples_have_no_transitions(self):
+        result = summarize_transitions([
+            sample("unknown", "2026-10-27T12:00:00+11:00"),
+            sample("unavailable", "2026-10-27T13:00:00+11:00"),
+        ], None, 80)
         self.assertIsNone(result["latest_matching_transition"])
         self.assertEqual(result["latest_by_raw_state"], {})
+        self.assertEqual(result["matching_transitions"], 0)
 
-    def test_event_limit_preserves_newest(self):
-        result = summarize_transitions(self.events, "off", 1)
+    def test_truncation_returns_newest_only(self):
+        result = summarize_transitions(self.items, "off", 1)
         self.assertTrue(result["truncated"])
+        self.assertEqual(len(result["events_newest_first"]), 1)
         self.assertEqual(
             result["events_newest_first"][0]["time"],
             "2026-10-27T13:18:10+11:00",
         )
-
-    def test_unknown_and_unavailable_are_never_returned(self):
-        extra = [
-            {
-                "state": state,
-                "time": "2026-10-27T14:00:00+11:00",
-                "sort_time": datetime.fromisoformat(
-                    "2026-10-27T14:00:00+11:00"
-                ).timestamp(),
-            }
-            for state in ["unknown", "unavailable", "UNKNOWN", "UNAVAILABLE"]
-        ]
-        result = summarize_transitions(self.events + extra, None, 80)
-        self.assertEqual(result["matching_transitions"], 3)
-        self.assertEqual(set(result["latest_by_raw_state"]), {"on", "off"})
-        self.assertEqual(
-            [item["state"] for item in result["events_newest_first"]],
-            ["off", "on", "off"],
-        )
-        self.assertEqual(
-            result["latest_matching_transition"]["time"],
-            "2026-10-27T13:18:10+11:00",
-        )
-
-    def test_only_unavailable_and_unknown_has_no_latest_state(self):
-        extra = [
-            {"state": "unknown", "time": "2026-10-27T14:00:00+11:00",
-             "sort_time": 10},
-            {"state": "unavailable", "time": "2026-10-27T14:10:00+11:00",
-             "sort_time": 20},
-        ]
-        result = summarize_transitions(extra, None, 80)
-        self.assertEqual(result["matching_transitions"], 0)
-        self.assertIsNone(result["latest_matching_transition"])
-        self.assertEqual(result["latest_by_raw_state"], {})
 
 
 if __name__ == "__main__":
