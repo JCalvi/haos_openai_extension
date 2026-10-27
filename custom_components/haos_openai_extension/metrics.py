@@ -139,8 +139,11 @@ def calculate_history_metrics(
                 result["current_state_duration_seconds"] = round(elapsed)
                 result["current_state_duration_human"] = format_duration(elapsed)
                 result["current_state_duration_since"] = last_transition["time"]
+                # Only gaps AFTER the most recent genuine transition
+                # make the current elapsed period uncertain. Older outages
+                # should not affect a newer uninterrupted state interval.
                 result["current_state_duration_may_include_gap"] = (
-                    last_transition_gap or had_invalid_gaps
+                    last_transition_gap
                 )
             else:
                 result["current_state_duration_seconds"] = None
