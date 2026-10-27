@@ -69,6 +69,41 @@ class HistorySummaryTests(unittest.TestCase):
             "2026-10-27T13:18:10+11:00",
         )
 
+    def test_unknown_and_unavailable_are_never_returned(self):
+        extra = [
+            {
+                "state": state,
+                "time": "2026-10-27T14:00:00+11:00",
+                "sort_time": datetime.fromisoformat(
+                    "2026-10-27T14:00:00+11:00"
+                ).timestamp(),
+            }
+            for state in ["unknown", "unavailable", "UNKNOWN", "UNAVAILABLE"]
+        ]
+        result = summarize_transitions(self.events + extra, None, 80)
+        self.assertEqual(result["matching_transitions"], 3)
+        self.assertEqual(set(result["latest_by_raw_state"]), {"on", "off"})
+        self.assertEqual(
+            [item["state"] for item in result["events_newest_first"]],
+            ["off", "on", "off"],
+        )
+        self.assertEqual(
+            result["latest_matching_transition"]["time"],
+            "2026-10-27T13:18:10+11:00",
+        )
+
+    def test_only_unavailable_and_unknown_has_no_latest_state(self):
+        extra = [
+            {"state": "unknown", "time": "2026-10-27T14:00:00+11:00",
+             "sort_time": 10},
+            {"state": "unavailable", "time": "2026-10-27T14:10:00+11:00",
+             "sort_time": 20},
+        ]
+        result = summarize_transitions(extra, None, 80)
+        self.assertEqual(result["matching_transitions"], 0)
+        self.assertIsNone(result["latest_matching_transition"])
+        self.assertEqual(result["latest_by_raw_state"], {})
+
 
 if __name__ == "__main__":
     unittest.main()
