@@ -13,8 +13,15 @@ def summarize_transitions(
     Each transition has 'state', 'time' (local ISO timestamp) and 'sort_time'
     (UTC epoch seconds). The internal numeric sort_time is not sent to the LLM.
     """
+    # Never pass unknown/unavailable through to the model as history
+    # events, including in the unfiltered per-state latest summary.
+    valid_transitions = [
+        event
+        for event in transitions
+        if event["state"].casefold() not in {"unknown", "unavailable"}
+    ]
     ordered = sorted(
-        transitions,
+        valid_transitions,
         key=lambda event: event["sort_time"],
         reverse=True,
     )
