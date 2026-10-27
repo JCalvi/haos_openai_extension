@@ -16,6 +16,7 @@ assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 summarize_transitions = module.summarize_transitions
+shape_history_detail = module.shape_history_detail
 
 
 def sample(state: str, timestamp: str) -> dict:
@@ -148,6 +149,42 @@ class HistorySummaryTests(unittest.TestCase):
             result["events_newest_first"][0]["time"],
             "2026-10-27T13:18:10+11:00",
         )
+
+    def test_summary_saves_tokens_without_changing_counts(self):
+        original = summarize_transitions(self.items, "off", 80)
+        compact = shape_history_detail(original, "summary", 80)
+        self.assertNotIn("events_newest_first", compact)
+        self.assertNotIn("truncated", compact)
+        self.assertEqual(compact["matching_transitions"], 3)
+        self.assertEqual(
+            compact["latest_matching_transition"],
+            original["latest_matching_transition"],
+        )
+        self.assertEqual(len(original["events_newest_first"]), 3)
+
+    def test_full_mode_keeps_existing_event_list(self):
+        original = summarize_transitions(self.items, None, 80)
+        full = shape_history_detail(original, "full", 80)
+        self.assertEqual(
+            full["events_newest_first"],
+            original["events_newest_first"],
+        )
+        self.assertEqual(full["matching_transitions"], 6)
+
+    def test_recent_mode_does_not_change_count(self):
+        original = summarize_transitions(self.items, None, 80)
+        recent = shape_history_detail(original, "recent", 80)
+        self.assertEqual(recent["matching_transitions"], 6)
+        self.assertEqual(len(recent["events_newest_first"]), 5)
+        self.assertTrue(recent["truncated"])
+
+    def test_limited_full_mode_is_accurately_marked_truncated(self):
+        original = summarize_transitions(self.items, None, 80)
+        limited = shape_history_detail(original, "full", 2)
+        self.assertEqual(len(limited["events_newest_first"]), 2)
+        self.assertTrue(limited["truncated"])
+        self.assertEqual(limited["matching_transitions"], 6)
+
 
 
 if __name__ == "__main__":
