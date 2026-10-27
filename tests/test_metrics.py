@@ -129,6 +129,25 @@ class MetricsTests(unittest.TestCase):
         )
         self.assertIsNone(data["current_state_duration_seconds"])
 
+
+    def test_old_outage_before_last_change_does_not_taint_elapsed_time(self):
+        samples = [
+            sample("off", "2026-10-27T10:00:00+11:00"),
+            sample("unavailable", "2026-10-27T10:10:00+11:00"),
+            sample("off", "2026-10-27T10:20:00+11:00"),
+            sample("on", "2026-10-27T13:16:08+11:00"),
+            sample("off", "2026-10-27T13:18:10+11:00"),
+        ]
+        data = calculate_history_metrics(
+            samples,
+            start_timestamp=ts("2026-10-27T10:00:00+11:00"),
+            end_timestamp=ts("2026-10-27T17:10:45+11:00"),
+            current_state="off",
+            is_live_window=True,
+        )
+        self.assertFalse(data["current_state_duration_may_include_gap"])
+        self.assertTrue(data["has_unavailable_gaps"])
+
     def test_format_duration(self):
         self.assertEqual(format_duration(0), "0 seconds")
         self.assertEqual(format_duration(11 * 60), "11 minutes")
