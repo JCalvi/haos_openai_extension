@@ -1,5 +1,6 @@
 """Read-only Recorder history tools for the existing Assist LLM API."""
 
+import json
 import logging
 from datetime import timedelta
 from time import perf_counter
@@ -70,6 +71,17 @@ def _resolve_entity(
         choices = ", ".join(entity.entity_id for entity in matches[:8])
         return None, f"Ambiguous name; specify entity_id. Matches: {choices}"
     return matches[0], None
+
+
+def _log_tool_performance(tool: str, started_at: float, payload: dict) -> None:
+    """Report cost only at DEBUG level; never log query data or entity IDs."""
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _LOGGER.debug(
+            "%s: total_ms=%.1f, result_bytes=%d",
+            tool,
+            (perf_counter() - started_at) * 1000,
+            len(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
+        )
 
 
 async def _async_read_observations(
@@ -163,6 +175,7 @@ class HistoryTool(Tool):
         self, hass: HomeAssistant, tool_input: ToolInput, llm_context: LLMContext
     ) -> ToolResult:
         """Return a bounded set of read-only history events."""
+        started_at = perf_counter()
         args = self.parameters(tool_input.tool_args)
         hours = args["hours"]
         if isinstance(hours, bool) or not 1 <= hours <= MAX_HOURS:
@@ -295,6 +308,7 @@ class HistoryTool(Tool):
                     output["last_closed_at"] = (
                         summary["latest_by_raw_state"].get("off", {}).get("time")
                     )
+                _log_tool_performance("get_history/latest", started_at, output)
                 return ToolResult(data=output)
 
             observations = (
@@ -387,6 +401,7 @@ class HistoryTool(Tool):
             # The LLM API prompt already documents result semantics.
             result.pop("note", None)
 
+        _log_tool_performance("get_history/complete", started_at, result)
         return ToolResult(data=result)
 
 
@@ -431,6 +446,7 @@ class CompareHistoryTool(Tool):
     async def async_call(
         self, hass: HomeAssistant, tool_input: ToolInput, llm_context: LLMContext
     ) -> ToolResult:
+        started_at = perf_counter()
         args = self.parameters(tool_input.tool_args)
         max_entities = args["max_entities"]
         max_results = args["max_results"]
@@ -523,7 +539,7 @@ class CompareHistoryTool(Tool):
                 error=True,
             )
 
-        return ToolResult(data={
+        response = {
             "domain": domain,
             "raw_state": raw_state,
             "metric": metric,
@@ -531,7 +547,9 @@ class CompareHistoryTool(Tool):
             "period_start": dt_util.as_local(start).isoformat(),
             "period_end": dt_util.as_local(end).isoformat(),
             **comparison,
-        })
+        }
+        _log_tool_performance("compare_history", started_at, response)
+        return ToolResult(data=response)
 
 
 @callback
