@@ -103,6 +103,10 @@ def rank_entities(
         }
         if issues:
             result["coverage_issues"] = issues
+            if start_unknown:
+                result["initial_unknown_seconds"] = metrics.get(
+                    "initial_unknown_seconds"
+                )
         result["score"] = seconds if metric == "total_duration" else count
         ranked.append(result)
 
