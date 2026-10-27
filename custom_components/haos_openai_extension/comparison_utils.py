@@ -81,6 +81,17 @@ def rank_entities(
         seconds = duration_data.get("seconds", 0)
         count = summary["matching_transitions"]
         coverage = metrics["duration_coverage_complete"]
+        # A missing initial state is different from an actual unavailable
+        # interval. Report them separately instead of implying bad sensors.
+        # All compared values are observed time; neither missing region
+        # is silently assumed to be off.
+        start_unknown = not metrics.get("period_start_state_known", coverage)
+        gaps = metrics.get("has_unavailable_gaps", False)
+        issues = []
+        if start_unknown:
+            issues.append("start_state_unknown")
+        if gaps:
+            issues.append("unavailable_gap")
         result = {
             "entity_id": entry["entity_id"],
             "name": entry["name"],
@@ -90,16 +101,28 @@ def rank_entities(
             "duration_human": duration_data.get("human", "0 seconds"),
             "coverage_complete": coverage,
         }
+        if issues:
+            result["coverage_issues"] = issues
         result["score"] = seconds if metric == "total_duration" else count
         ranked.append(result)
 
     ranked.sort(key=lambda x: (-x["score"], x["name"].casefold(), x["entity_id"]))
     missing = sum(not item["coverage_complete"] for item in ranked)
+    unknown_starts = sum(
+        "start_state_unknown" in item.get("coverage_issues", [])
+        for item in ranked
+    )
+    unavailable_gaps = sum(
+        "unavailable_gap" in item.get("coverage_issues", [])
+        for item in ranked
+    )
     has_data = bool(ranked)
     return {
         "compared_entities": len(ranked),
         "results_returned": min(len(ranked), limit),
         "coverage_incomplete_entities": missing,
+        "start_state_unknown_entities": unknown_starts,
+        "unavailable_gap_entities": unavailable_gaps,
         "ranking_complete": has_data and missing == 0,
         "ranking_basis": (
             "recorded time in state" if metric == "total_duration"
@@ -110,7 +133,8 @@ def rank_entities(
             for item in ranked[:limit]
         ],
         "note": (
-            "Ranking uses recorded states only; unavailable data, missed "
-            "transitions or retention gaps can affect comparisons."
+            "Ranking uses observed states only. Unknown state at the "
+            "start of the period or unavailable gaps can make total "
+            "durations lower than the actual time; check coverage_issues."
         ) if missing else None,
     }
