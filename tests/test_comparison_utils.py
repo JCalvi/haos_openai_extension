@@ -127,6 +127,39 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(result["coverage_incomplete_entities"], 1)
         self.assertTrue(result["note"])
 
+    def test_missing_midnight_baseline_is_not_assumed_off(self):
+        # The user's yesterday comparison showed multiple missing start
+        # baselines. The totals remain observed lower bounds, not exact.
+        items = [
+            result_entry("Stove", 8802, 3, coverage=False),
+            result_entry("Garage", 1122, 8, coverage=True),
+        ]
+        result = rank_entities(
+            items, metric="total_duration", state="on", limit=5
+        )
+        self.assertEqual(result["results"][0]["name"], "Stove")
+        self.assertEqual(result["results"][0]["duration_seconds"], 8802)
+        self.assertFalse(result["ranking_complete"])
+        self.assertEqual(result["start_state_unknown_entities"], 1)
+        self.assertEqual(result["unavailable_gap_entities"], 0)
+        self.assertEqual(
+            result["results"][0]["coverage_issues"],
+            ["start_state_unknown"],
+        )
+
+    def test_unavailable_gap_reported_separately_from_start_baseline(self):
+        entry = result_entry("Hallway", 100, 5, coverage=False)
+        entry["metrics"]["period_start_state_known"] = True
+        entry["metrics"]["has_unavailable_gaps"] = True
+        result = rank_entities(
+            [entry], metric="total_duration", state="on", limit=5
+        )
+        self.assertEqual(result["start_state_unknown_entities"], 0)
+        self.assertEqual(result["unavailable_gap_entities"], 1)
+        self.assertEqual(
+            result["results"][0]["coverage_issues"], ["unavailable_gap"]
+        )
+
     def test_stable_tie_sorting(self):
         items = [
             result_entry("Zed", 100, 3),
