@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**Experimental v0.1.2** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**Experimental v0.1.3** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The first feature, `haos_openai_extension__get_history`, reads state transitions from Home Assistant's Recorder history.
 
@@ -8,14 +8,10 @@ The first feature, `haos_openai_extension__get_history`, reads state transitions
 
 1. In HACS, add `https://github.com/JCalvi/haos_openai_extension` as a **custom repository** of type **Integration**.
 2. Download the latest release in HACS.
-3. Add the following to `configuration.yaml`:
-
-   ```yaml
-   haos_openai_extension:
-   ```
-
-4. Restart Home Assistant.
-5. Leave **Assist / Device control** enabled in your existing OpenAI conversation agent. No extra checkbox, API key, separate conversation agent or Alexa Lambda changes are needed.
+3. Restart Home Assistant after HACS downloads the integration.
+4. Open **Settings → Devices & services → Add integration** and search for **HAOS OpenAI Extension**.
+5. Click **Submit** to enable it. No fields, API key, or YAML changes are needed.
+6. Leave **Assist / Device control** enabled in your existing OpenAI conversation agent. No separate conversation agent or Alexa Lambda changes are needed.
 
 **After upgrading in HACS:** restart Home Assistant to load the changed Python module.
 
@@ -29,10 +25,14 @@ In the OpenAI conversation trace (**Show details**), look for a call to `haos_op
 
 If there is no history tool call:
 
-- Confirm `haos_openai_extension:` is in `configuration.yaml`.
-- Check **Settings → System → Logs** for `HAOS OpenAI Extension loaded`.
+- Confirm **HAOS OpenAI Extension** appears as configured under **Settings → Devices & services** (rather than only in HACS).
+- Check **Settings → System → Logs** for `HAOS OpenAI Extension enabled: Recorder history for Assist`.
 - Confirm HACS downloaded the current release, restart, and start a *new conversation* in Assist.
 - Ensure the target entity is exposed under **Settings → Voice assistants → Expose → Assist**.
+
+## Existing YAML installations
+
+Versions up to v0.1.2 required a `haos_openai_extension:` entry in `configuration.yaml`. Starting in v0.1.3 the integration is configured entirely through the UI. New installations do not require YAML. If you previously configured it in YAML, remove that old line when migrating to the UI-based setup.
 
 ## Capabilities and safety
 
