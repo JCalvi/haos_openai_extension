@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**Experimental v0.1.1** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**Experimental v0.1.2** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The first feature, `haos_openai_extension__get_history`, reads state transitions from Home Assistant's Recorder history.
 
@@ -45,6 +45,25 @@ If there is no history tool call:
 - Recorder queries are read-only, restricted to a single matched entity and capped for response size.
 - Events are returned with Home Assistant's **local timezone**.
 - A missing transition is not evidence that it never happened: Recorder may have purged it or excluded the entity.
+
+## Garage doors and other safety-sensitive covers
+
+**Do not expose the actual garage door `cover` entity to Assist or native Alexa** if voice opening/closing must be prevented. Home Assistant's normal exposure toggle is not a read-only service-permission switch.
+
+For status and history, use a **binary sensor** with a correctly configured device class, for example:
+
+- Expose `binary_sensor.garage_door_input` to **Assist**.
+- Set **Show as → Garage door** if `on` actually means open and `off` means closed.
+- Keep the actual `cover` unexposed to Assist and to the separate Nabu Casa Alexa smart-home integration.
+- Also avoid exposing scripts, scenes, or controls which trigger garage movement.
+
+The history tool itself never controls a device, and it only returns data for exposed entities. Changing **Show as** improves the meaning of on/off but does not independently create Recorder history.
+
+## Branding
+
+The OpenAI-inspired / smart-home icon is bundled at
+`custom_components/haos_openai_extension/brand/icon.png`.
+Home Assistant 2026.3+ uses in-repository brand images automatically; some HACS builds may still display a placeholder in their own repository list.
 
 ## Current limitations
 
