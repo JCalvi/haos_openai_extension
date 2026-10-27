@@ -120,6 +120,40 @@ class MetricsTests(unittest.TestCase):
         )
         self.assertNotIn("current_state_duration_seconds", data)
 
+    def test_missing_start_baseline_reports_exact_unknown_initial_time(self):
+        start = "2026-10-27T09:00:00+11:00"
+        end = "2026-10-27T10:00:00+11:00"
+        data = calculate_history_metrics(
+            [
+                sample("off", "2026-10-27T09:28:12+11:00"),
+                sample("on", "2026-10-27T09:30:00+11:00"),
+                sample("off", "2026-10-27T09:40:00+11:00"),
+            ],
+            start_timestamp=ts(start),
+            end_timestamp=ts(end),
+            current_state=None,
+            is_live_window=False,
+        )
+        self.assertFalse(data["period_start_state_known"])
+        self.assertEqual(data["initial_unknown_seconds"], 28 * 60 + 12)
+        self.assertFalse(data["duration_coverage_complete"])
+        self.assertEqual(
+            data["total_observed_duration_by_raw_state"]["on"]["seconds"],
+            600,
+        )
+
+    def test_no_records_means_entire_requested_window_is_unknown(self):
+        data = calculate_history_metrics(
+            [],
+            start_timestamp=ts("2026-10-27T09:00:00+11:00"),
+            end_timestamp=ts("2026-10-27T10:00:00+11:00"),
+            current_state=None,
+            is_live_window=False,
+        )
+        self.assertEqual(data["initial_unknown_seconds"], 3600)
+        self.assertFalse(data["duration_coverage_complete"])
+        self.assertEqual(data["total_observed_duration_by_raw_state"], {})
+
     def test_no_change_in_window_does_not_invent_current_start(self):
         data = calculate_history_metrics(
             [sample("off", "2026-10-27T10:00:00+11:00")],
