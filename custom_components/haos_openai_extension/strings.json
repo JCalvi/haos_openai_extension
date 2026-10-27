@@ -1,0 +1,14 @@
+{
+  "title": "HAOS OpenAI Extension",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Enable HAOS OpenAI Extension",
+        "description": "Add read-only Home Assistant Recorder history lookups to the existing Assist conversation API. No account, API key, or YAML configuration is required."
+      }
+    },
+    "abort": {
+      "already_configured": "HAOS OpenAI Extension is already configured."
+    }
+  }
+}
