@@ -1,6 +1,7 @@
 """Regression checks for deterministic last-event selection (stdlib only)."""
 
 from pathlib import Path
+from datetime import datetime
 import importlib.util
 import unittest
 
@@ -19,10 +20,20 @@ summarize_transitions = module.summarize_transitions
 
 class HistorySummaryTests(unittest.TestCase):
     def setUp(self):
+        # Intentionally unsorted: an older 11:48 closing must never win
+        # over the newer 13:18 closing shown in the user's HA history.
+        timestamps = [
+            ("off", "2026-10-27T11:48:11+11:00"),
+            ("off", "2026-10-27T13:18:10+11:00"),
+            ("on", "2026-10-27T13:16:08+11:00"),
+        ]
         self.events = [
-            {"state": "off", "time": "2026-10-27T11:48:11+11:00", "sort_time": 1793063291},
-            {"state": "off", "time": "2026-10-27T13:18:10+11:00", "sort_time": 1793068690},
-            {"state": "on", "time": "2026-10-27T13:16:08+11:00", "sort_time": 1793068568},
+            {
+                "state": state,
+                "time": timestamp,
+                "sort_time": datetime.fromisoformat(timestamp).timestamp(),
+            }
+            for state, timestamp in timestamps
         ]
 
     def test_last_closed_is_118pm_not_1148am(self):
