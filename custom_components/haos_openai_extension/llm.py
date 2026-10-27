@@ -19,7 +19,7 @@ from homeassistant.helpers.llm import (
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .history_utils import summarize_transitions
+from .history_utils import shape_history_detail, summarize_transitions
 from .metrics import calculate_history_metrics
 from .window_utils import resolve_history_window
 
@@ -233,21 +233,9 @@ class HistoryTool(Tool):
             is_live_window=is_live_window,
         )
 
-        # Do not transmit an 80-event history unless explicitly requested.
-        # The full query/count still runs, so small responses never discard
-        # available history or miscount events.
-        if detail == "summary":
-            summary.pop("events_newest_first", None)
-            summary.pop("truncated", None)
-        elif detail == "recent":
-            limit = min(max_events, 5)
-            summary["events_newest_first"] = summary["events_newest_first"][:limit]
-            summary["truncated"] = summary["matching_transitions"] > limit
-        else:
-            summary["events_newest_first"] = (
-                summary["events_newest_first"][:max_events]
-            )
-            summary["truncated"] = summary["matching_transitions"] > max_events
+        # The full Recorder history is still counted; only its response
+        # representation is shortened for the default voice summary.
+        summary = shape_history_detail(summary, detail, max_events)
 
         # Continuous-value entities can have thousands of different states;
         # bound per-state breakdowns in compact responses only.
@@ -333,6 +321,8 @@ def async_get_tools(
             "For total time spent in a state during a period, use "
             "total_observed_duration_by_raw_state and disclose unknown gaps. "
             "Never calculate durations or current time yourself. "
+            "If current_state_duration_may_include_gap is true, warn that "
+            "continuous activity during offline periods is unverified. "
             "Ask for detail=summary for concise answers, detail=recent for "
             "last five events, detail=full for detailed lists/correlations. "
             "Never invent identities or match fingerprint events to door "
