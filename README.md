@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**v1.0.2** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**v1.0.3** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The integration provides read-only Recorder history and cross-entity comparison tools: `haos_openai_extension__get_history` and `haos_openai_extension__compare_history`.
 
@@ -52,17 +52,34 @@ of 40.
 **The query is read-only and checks Assist exposure for every entity before
 accessing Recorder.** If more devices match than the allowed limit, it returns
 an error rather than presenting an incomplete result as definitive. Missing
-history and unavailable periods are identified through coverage flags, so
-results with incomplete coverage are described as *observed* rather than
-definitively the longest.
+history and unavailable periods are identified through coverage flags.
+The tool calculates how much of each requested period was unobserved, so
+short Recorder interruptions do not automatically prevent a definitive result.
 
 For each incomplete result, `coverage_issues` identifies whether the state
 at the start of the period is unknown (`start_state_unknown`) or Recorder
 contains an unavailable gap (`unavailable_gap`). The response also includes
 `start_state_unknown_entities`, `unavailable_gap_entities`, and, where
-applicable, `initial_unknown_seconds`. An unknown interval is **not**
-automatically treated as off. A ranking with incomplete coverage is therefore
-a ranking of *recorded* usage, not a guarantee about the full day.
+applicable, `initial_unknown_seconds`. It also calculates
+`unknown_duration_seconds` (all unobserved time),
+`unavailable_gap_seconds` (unobserved time following a recorded
+unknown/unavailable state), and `maximum_possible_duration_seconds`
+(the requested state was active throughout *every* unknown interval,
+plus a one-second rounding allowance).
+
+For total-duration comparisons, `winner_proven=true` means the leading
+device's conservatively estimated minimum time is greater than **every**
+other device's maximum possible time, including entities outside the top
+five displayed. A winner can therefore be proven even if
+`ranking_complete=false` because some sensors had gaps.
+`winner_margin_min_seconds` gives the conservative minimum lead.
+If `winner_proven=false`, report the *longest recorded on-time* rather
+than claiming an absolute winner. Event-count comparisons cannot bound
+transitions missed during unavailable periods.
+
+These are guarantees **relative to the gaps represented in Recorder**, not
+proof that a physical device never changed while its integration failed
+to record a state change. No missing interval is silently treated as off.
 
 ## Targeted last-event lookups
 
