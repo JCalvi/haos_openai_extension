@@ -421,6 +421,11 @@ class CompareHistoryTool(Tool):
         "does NOT prove compressor runtime. Period defaults to today; "
         "supply hours without period for a rolling window, or use period "
         "and ISO start_time/end_time as with get_history. "
+        "Set max_results=1 for a singular winner question such as "
+        "'which light was on longest?'; max_results=3 for an unspecified "
+        "top list; use the requested number for explicit top 5/top 10 "
+        "(maximum 10). Always evaluate ALL matching exposed entities "
+        "regardless of max_results so winner_proven stays accurate. "
         "Results contain up to ten entities ranked deterministically, "
         "with unavailable_gap_seconds and conservative maximum possible "
         "on-time per device. For total_duration, winner_proven=true means "
@@ -446,7 +451,7 @@ class CompareHistoryTool(Tool):
         probatio.Optional("start_time"): str,
         probatio.Optional("end_time"): str,
         probatio.Optional("max_entities", default=30): int,
-        probatio.Optional("max_results", default=5): int,
+        probatio.Optional("max_results", default=3): int,
         probatio.Optional("name_contains"): str,
     })
 
@@ -578,6 +583,10 @@ def async_get_tools(
             "was on longest/most often' comparisons across lights, "
             "switches or sensors, call haos_openai_extension__compare_history "
             "ONCE, rather than get_history for each entity. "
+            "For 'which one' / 'the longest' / 'the most', call with "
+            "max_results=1. For a general ranking use max_results=3; "
+            "for an explicitly requested top N, use N up to 10. "
+            "All devices are still evaluated for the winner proof. "
             "For duration comparisons, use winner_proven: if true, the "
             "leader is certain even if ranking_complete=false, since its "
             "observed minimum exceeds all competitors' maximum possible "
