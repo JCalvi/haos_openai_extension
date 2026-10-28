@@ -133,6 +133,8 @@ def get_significant_states(
             historical("off", NOW.replace(hour=18, minute=0)),
         ],
     }
+    if hasattr(hass.recorder, "custom_dataset"):
+        dataset = hass.recorder.custom_dataset
     result = {}
     for entity_id in entity_ids:
         data = dataset.get(entity_id, [])
@@ -294,6 +296,59 @@ class ToolContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.data["results"][0]["duration_seconds"], 3600)
         self.assertNotIn("light.secret", str(response.data))
         self.assertNotIn("cover.garage", str(response.data))
+
+    async def test_batched_comparison_proves_winner_through_short_outage(self):
+        self.hass.recorder.custom_dataset = {
+            "light.stove": [
+                historical("off", NOW.replace(hour=0, minute=0)),
+                historical("on", NOW.replace(hour=10, minute=0)),
+                historical("off", NOW.replace(hour=11, minute=0)),
+                historical("unavailable", NOW.replace(hour=11, minute=30)),
+                historical("off", NOW.replace(hour=11, minute=31)),
+            ],
+            "light.hall": [
+                historical("off", NOW.replace(hour=0, minute=0)),
+                historical("on", NOW.replace(hour=10, minute=0)),
+                historical("off", NOW.replace(hour=10, minute=5)),
+            ],
+        }
+        response = await llm_module.CompareHistoryTool().async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "domain": "light", "period": "today"
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(self.hass.recorder.calls, 1)
+        self.assertEqual(response.data["unavailable_gap_entities"], 1)
+        self.assertEqual(response.data["results"][0]["duration_seconds"], 3600)
+        self.assertEqual(response.data["results"][0]["unavailable_gap_seconds"], 60)
+        self.assertFalse(response.data["ranking_complete"])
+        self.assertTrue(response.data["winner_proven"])
+
+    async def test_batched_comparison_refuses_proof_if_loser_gap_is_large(self):
+        self.hass.recorder.custom_dataset = {
+            "light.stove": [
+                historical("off", NOW.replace(hour=0, minute=0)),
+                historical("on", NOW.replace(hour=10, minute=0)),
+                historical("off", NOW.replace(hour=11, minute=0)),
+            ],
+            "light.hall": [
+                historical("off", NOW.replace(hour=0, minute=0)),
+                historical("on", NOW.replace(hour=10, minute=0)),
+                historical("unavailable", NOW.replace(hour=10, minute=2)),
+                historical("off", NOW.replace(hour=13, minute=0)),
+            ],
+        }
+        response = await llm_module.CompareHistoryTool().async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "domain": "light", "period": "today", "max_results": 1
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(self.hass.recorder.calls, 1)
+        self.assertEqual(response.data["results"][0]["name"], "Stove Bench Light")
+        self.assertFalse(response.data["winner_proven"])
+        self.assertEqual(response.data["coverage_incomplete_entities"], 1)
 
     async def test_comparison_explicit_hours_is_rolling_window(self):
         tool = llm_module.CompareHistoryTool()
