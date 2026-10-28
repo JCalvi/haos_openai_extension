@@ -1,6 +1,6 @@
 # HAOS OpenAI Extension
 
-**v1.0.3** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
+**v1.0.4** — extra read-only LLM tools for the **existing** Home Assistant Assist API. Built to work with the official OpenAI conversation integration, including Alexa requests forwarded to that conversation agent.
 
 The integration provides read-only Recorder history and cross-entity comparison tools: `haos_openai_extension__get_history` and `haos_openai_extension__compare_history`.
 
@@ -38,14 +38,18 @@ If there is no history tool call:
 
 Ask naturally, for example:
 
-- **"Which light was on for the longest time today?"** — one Recorder query compares the total recorded on-time for all Assist-exposed lights, returning a ranked top five.
+- **"Which light was on for the longest time today?"** — one Recorder query compares all Assist-exposed lights, normally returning just the winner.
 - **"Which switch was switched on most often yesterday?"** — ranks observed transitions to `on`.
 - **"Which climate unit spent longest in cool mode yesterday?"** — compares the selected climate state `cool`. This is **not a compressor-runtime measurement**.
 
 The `haos_openai_extension__compare_history` tool accepts `domain`, `state`
 (default `on`), `metric` (`total_duration` or `transition_count`),
 `period` or ISO date ranges, and optional `name_contains` filtering.
-It returns the top five results by default (up to ten). A comparison normally
+It returns the top three results by default (up to ten). Luna is instructed
+to request **`max_results=1` for a single-winner question**, `max_results=3`
+for a general shortlist, and the explicitly requested number for top-N lists.
+This limits only the response: **every matching light is still analysed**
+and included in the `winner_proven` calculation. A comparison normally
 permits up to 30 matching entities, configurable per query to a hard maximum
 of 40.
 
