@@ -60,8 +60,10 @@ def rank_entities(
     """Return a small ranking using already calculated Recorder summaries.
 
     Entries contain a per-entity summary and metrics generated using the
-    same time window. Do not mix incompletely covered histories into a
-    claimed definitive winner.
+    same time window. Each missing interval could be entirely in the
+    requested state; compare the observed leader's conservative lower
+    bound against EVERY other device's upper bound before proving a
+    winner. Counts cannot be bounded during unavailable intervals.
     """
     if metric not in {"total_duration", "transition_count"}:
         raise ValueError("metric must be total_duration or transition_count")
@@ -81,6 +83,13 @@ def rank_entities(
         seconds = duration_data.get("seconds", 0)
         count = summary["matching_transitions"]
         coverage = metrics["duration_coverage_complete"]
+        # An incomplete history without a measured unknown interval cannot
+        # establish a winner. This also supports older helper callers.
+        missing_seconds = metrics.get(
+            "unknown_duration_seconds", 0 if coverage else None
+        )
+        if missing_seconds is not None:
+            missing_seconds = max(0, missing_seconds)
         # A missing initial state is different from an actual unavailable
         # interval. Report them separately instead of implying bad sensors.
         # All compared values are observed time; neither missing region
@@ -101,12 +110,27 @@ def rank_entities(
             "duration_human": duration_data.get("human", "0 seconds"),
             "coverage_complete": coverage,
         }
+        if missing_seconds is not None:
+            # Integer-duration fields are rounded. Add a one-second
+            # conservative margin to bounds used for winner proof so
+            # sub-second rounding can never create a false winner.
+            result["_lower_bound"] = max(0, seconds - 1)
+            result["_upper_bound"] = seconds + missing_seconds + 1
         if issues:
             result["coverage_issues"] = issues
             if start_unknown:
                 result["initial_unknown_seconds"] = metrics.get(
                     "initial_unknown_seconds"
                 )
+            result["unknown_duration_seconds"] = missing_seconds
+            if gaps:
+                result["unavailable_gap_seconds"] = metrics.get(
+                    "unavailable_gap_seconds"
+                )
+            if metric == "total_duration" and missing_seconds is not None:
+                result["maximum_possible_duration_seconds"] = result[
+                    "_upper_bound"
+                ]
         result["score"] = seconds if metric == "total_duration" else count
         ranked.append(result)
 
@@ -121,6 +145,33 @@ def rank_entities(
         for item in ranked
     )
     has_data = bool(ranked)
+
+    # Calculations cover the entire set, NOT just the top N returned.
+    # This prevents a hidden lower-ranked device with an enormous
+    # outage from incorrectly being excluded as a possible winner.
+    winner_proven = False
+    winner_margin = None
+    if ranked:
+        leader = ranked[0]
+        others = ranked[1:]
+        if metric == "total_duration":
+            if "_lower_bound" in leader and all(
+                "_upper_bound" in item for item in others
+            ):
+                strongest_challenger = max(
+                    (item["_upper_bound"] for item in others),
+                    default=-1,
+                )
+                winner_margin = leader["_lower_bound"] - strongest_challenger
+                winner_proven = winner_margin > 0
+        elif missing == 0:
+            # A zero-length outage can still conceal any number of
+            # transitions. Only fully covered count rankings are proven.
+            runner_up = max(
+                (item["score"] for item in others), default=-1
+            )
+            winner_proven = leader["score"] > runner_up
+
     return {
         "compared_entities": len(ranked),
         "results_returned": min(len(ranked), limit),
@@ -128,17 +179,34 @@ def rank_entities(
         "start_state_unknown_entities": unknown_starts,
         "unavailable_gap_entities": unavailable_gaps,
         "ranking_complete": has_data and missing == 0,
+        "winner_proven": winner_proven,
+        "winner_margin_min_seconds": (
+            winner_margin if winner_proven and metric == "total_duration"
+            else None
+        ),
         "ranking_basis": (
             "recorded time in state" if metric == "total_duration"
             else "recorded transitions into state"
         ),
         "results": [
-            {key: value for key, value in item.items() if key != "score"}
+            {
+                key: value for key, value in item.items()
+                if key not in {
+                    "score", "_lower_bound", "_upper_bound"
+                }
+            }
             for item in ranked[:limit]
         ],
         "note": (
-            "Ranking uses observed states only. Unknown state at the "
-            "start of the period or unavailable gaps can make total "
-            "durations lower than the actual time; check coverage_issues."
-        ) if missing else None,
+            "Recorded winner is still certain: its observed lower bound "
+            "exceeds every other device's possible upper bound. "
+            "Individual on-times may be underestimated."
+            if winner_proven and missing and metric == "total_duration"
+            else (
+                "Ranking uses observed states only. Unknown initial states "
+                "and unavailable intervals may hide additional usage; "
+                "the highest recorded value is not a guaranteed winner."
+                if missing else None
+            )
+        ),
     }
