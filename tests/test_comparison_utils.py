@@ -160,6 +160,107 @@ class ComparisonTests(unittest.TestCase):
             result["results"][0]["coverage_issues"], ["unavailable_gap"]
         )
 
+    def test_winner_is_proven_despite_short_sensor_outages(self):
+        stove = result_entry("Stove", 8802, 3, coverage=False)
+        stove["metrics"].update({
+            "period_start_state_known": True,
+            "has_unavailable_gaps": True,
+            "unknown_duration_seconds": 45,
+            "unavailable_gap_seconds": 45,
+        })
+        dining = result_entry("Dining", 1824, 1, coverage=False)
+        dining["metrics"].update({
+            "period_start_state_known": True,
+            "has_unavailable_gaps": True,
+            "unknown_duration_seconds": 240,
+            "unavailable_gap_seconds": 240,
+        })
+        hallway = result_entry("Hallway", 1554, 5, coverage=True)
+        result = rank_entities(
+            [stove, dining, hallway],
+            metric="total_duration", state="on", limit=2,
+        )
+        self.assertFalse(result["ranking_complete"])
+        self.assertTrue(result["winner_proven"])
+        self.assertGreater(result["winner_margin_min_seconds"], 0)
+        self.assertEqual(result["coverage_incomplete_entities"], 2)
+        self.assertEqual(result["results"][0]["name"], "Stove")
+        self.assertEqual(result["results"][0]["unavailable_gap_seconds"], 45)
+        self.assertEqual(
+            result["results"][0]["maximum_possible_duration_seconds"],
+            8802 + 45 + 1,
+        )
+        self.assertIn("still certain", result["note"])
+
+    def test_large_gap_can_change_winner(self):
+        stove = result_entry("Stove", 8802, 3)
+        dining = result_entry("Dining", 1824, 1, coverage=False)
+        dining["metrics"].update({
+            "period_start_state_known": True,
+            "has_unavailable_gaps": True,
+            "unknown_duration_seconds": 8000,
+            "unavailable_gap_seconds": 8000,
+        })
+        result = rank_entities(
+            [stove, dining], metric="total_duration", state="on", limit=2
+        )
+        self.assertFalse(result["winner_proven"])
+        self.assertIsNone(result["winner_margin_min_seconds"])
+        self.assertIn("not a guaranteed winner", result["note"])
+
+    def test_proof_considers_competitors_not_displayed_in_top_five(self):
+        top = result_entry("Top", 3600, 3)
+        others = [result_entry(f"Other {i}", 10, 1) for i in range(7)]
+        hidden = result_entry("Hidden", 1, 1, coverage=False)
+        hidden["metrics"].update({
+            "period_start_state_known": True,
+            "has_unavailable_gaps": True,
+            "unknown_duration_seconds": 7200,
+            "unavailable_gap_seconds": 7200,
+        })
+        result = rank_entities(
+            [top, *others, hidden],
+            metric="total_duration", state="on", limit=2
+        )
+        self.assertEqual(result["results_returned"], 2)
+        self.assertFalse(result["winner_proven"])
+        self.assertEqual(result["coverage_incomplete_entities"], 1)
+
+    def test_tied_recorded_durations_are_not_unique_winner(self):
+        items = [
+            result_entry("Stove", 300, 3),
+            result_entry("Hallway", 300, 2),
+        ]
+        result = rank_entities(
+            items, metric="total_duration", state="on", limit=2
+        )
+        self.assertTrue(result["ranking_complete"])
+        self.assertFalse(result["winner_proven"])
+
+    def test_counts_are_not_proven_through_even_short_outages(self):
+        stove = result_entry("Stove", 8802, 20)
+        hallway = result_entry("Hallway", 100, 1, coverage=False)
+        hallway["metrics"].update({
+            "period_start_state_known": True,
+            "has_unavailable_gaps": True,
+            "unknown_duration_seconds": 1,
+            "unavailable_gap_seconds": 1,
+        })
+        result = rank_entities(
+            [stove, hallway],
+            metric="transition_count", state="on", limit=2,
+        )
+        self.assertFalse(result["winner_proven"])
+        self.assertIsNone(result["winner_margin_min_seconds"])
+        hallway["metrics"]["duration_coverage_complete"] = True
+        hallway["metrics"]["has_unavailable_gaps"] = False
+        hallway["metrics"]["unknown_duration_seconds"] = 0
+        result = rank_entities(
+            [stove, hallway],
+            metric="transition_count", state="on", limit=2,
+        )
+        self.assertTrue(result["winner_proven"])
+
     def test_stable_tie_sorting(self):
         items = [
             result_entry("Zed", 100, 3),
