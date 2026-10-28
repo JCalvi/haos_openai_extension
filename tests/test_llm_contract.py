@@ -297,6 +297,52 @@ class ToolContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("light.secret", str(response.data))
         self.assertNotIn("cover.garage", str(response.data))
 
+    async def test_default_comparison_returns_at_most_three(self):
+        # Ranking considers all exposed devices, but transmits only three.
+        self.hass.allowed.update({
+            "light.third", "light.fourth", "light.fifth"
+        })
+        for i, name in enumerate(("third", "fourth", "fifth")):
+            light = State(f"light.{name}", name.title(), "off")
+            self.hass.states.entries[light.entity_id] = light
+        response = await llm_module.CompareHistoryTool().async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "domain": "light", "period": "today"
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(response.data["compared_entities"], 5)
+        self.assertEqual(response.data["results_returned"], 3)
+        self.assertEqual(len(response.data["results"]), 3)
+        self.assertEqual(len(self.hass.recorder.ids_requested[0]), 5)
+        self.assertEqual(self.hass.recorder.calls, 1)
+
+    async def test_one_result_retains_all_entity_winner_proof(self):
+        # max_results=1 must only limit presentation, not the comparison.
+        response = await llm_module.CompareHistoryTool().async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "domain": "light", "period": "today", "max_results": 1
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(response.data["compared_entities"], 2)
+        self.assertEqual(response.data["results_returned"], 1)
+        self.assertEqual(response.data["results"][0]["name"], "Stove Bench Light")
+        self.assertTrue(response.data["winner_proven"])
+        self.assertEqual(self.hass.recorder.calls, 1)
+        self.assertEqual(
+            self.hass.recorder.ids_requested[0], ["light.stove", "light.hall"]
+        )
+
+    async def test_explicit_top_ten_is_still_available(self):
+        response = await llm_module.CompareHistoryTool().async_call(
+            self.hass, types.SimpleNamespace(tool_args={
+                "domain": "light", "max_results": 10
+            }), LLMAssistContext()
+        )
+        self.assertFalse(response.error, response.data)
+        self.assertEqual(response.data["results_returned"], 2)
+
     async def test_batched_comparison_proves_winner_through_short_outage(self):
         self.hass.recorder.custom_dataset = {
             "light.stove": [
