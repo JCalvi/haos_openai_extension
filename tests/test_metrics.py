@@ -108,6 +108,83 @@ class MetricsTests(unittest.TestCase):
         self.assertTrue(data["has_unavailable_gaps"])
         self.assertFalse(data["duration_coverage_complete"])
 
+    def test_unavailable_seconds_are_excluded_from_observed_on_time(self):
+        # 10:12..10:14 is unobserved even though the light is 'on'
+        # both before and after the interruption.
+        samples = [
+            sample("off", "2026-10-27T10:00:00+11:00"),
+            sample("on", "2026-10-27T10:10:00+11:00"),
+            sample("unavailable", "2026-10-27T10:12:00+11:00"),
+            sample("on", "2026-10-27T10:14:00+11:00"),
+            sample("off", "2026-10-27T10:20:00+11:00"),
+        ]
+        data = calculate_history_metrics(
+            samples,
+            start_timestamp=ts("2026-10-27T10:00:00+11:00"),
+            end_timestamp=ts("2026-10-27T10:30:00+11:00"),
+            current_state=None, is_live_window=False,
+        )
+        self.assertEqual(data["unavailable_gap_seconds"], 120)
+        self.assertEqual(data["unknown_duration_seconds"], 120)
+        self.assertEqual(data["unknown_duration_human"], "2 minutes")
+        self.assertEqual(data["initial_unknown_seconds"], 0)
+        self.assertEqual(
+            data["total_observed_duration_by_raw_state"]["on"]["seconds"],
+            480,
+        )
+
+    def test_late_unavailable_state_counts_until_window_end(self):
+        data = calculate_history_metrics(
+            [
+                sample("off", "2026-10-27T10:00:00+11:00"),
+                sample("on", "2026-10-27T10:10:00+11:00"),
+                sample("unavailable", "2026-10-27T10:15:00+11:00"),
+            ],
+            start_timestamp=ts("2026-10-27T10:00:00+11:00"),
+            end_timestamp=ts("2026-10-27T10:30:00+11:00"),
+            current_state=None, is_live_window=False,
+        )
+        self.assertEqual(data["unavailable_gap_seconds"], 900)
+        self.assertEqual(data["unknown_duration_seconds"], 900)
+        self.assertEqual(
+            data["total_observed_duration_by_raw_state"]["on"]["seconds"],
+            300,
+        )
+
+    def test_initial_unknown_and_later_gap_are_not_double_counted(self):
+        data = calculate_history_metrics(
+            [
+                sample("unknown", "2026-10-27T09:00:00+11:00"),
+                sample("off", "2026-10-27T09:28:12+11:00"),
+                sample("on", "2026-10-27T09:30:00+11:00"),
+                sample("unavailable", "2026-10-27T09:34:00+11:00"),
+                sample("on", "2026-10-27T09:36:00+11:00"),
+                sample("off", "2026-10-27T09:40:00+11:00"),
+            ],
+            start_timestamp=ts("2026-10-27T09:00:00+11:00"),
+            end_timestamp=ts("2026-10-27T10:00:00+11:00"),
+            current_state=None, is_live_window=False,
+        )
+        self.assertEqual(data["initial_unknown_seconds"], 1692)
+        self.assertEqual(data["unavailable_gap_seconds"], 120)
+        self.assertEqual(data["unknown_duration_seconds"], 1812)
+        self.assertFalse(data["duration_coverage_complete"])
+
+    def test_duplicate_same_state_does_not_create_missing_time(self):
+        data = calculate_history_metrics(
+            [
+                sample("off", "2026-10-27T10:00:00+11:00"),
+                sample("off", "2026-10-27T10:15:00+11:00"),
+                sample("off", "2026-10-27T10:25:00+11:00"),
+            ],
+            start_timestamp=ts("2026-10-27T10:00:00+11:00"),
+            end_timestamp=ts("2026-10-27T10:30:00+11:00"),
+            current_state=None, is_live_window=False,
+        )
+        self.assertEqual(data["unknown_duration_seconds"], 0)
+        self.assertEqual(data["unavailable_gap_seconds"], 0)
+        self.assertTrue(data["duration_coverage_complete"])
+
     def test_invalid_current_state_does_not_have_elapsed_time(self):
         data = calculate_history_metrics(
             [
