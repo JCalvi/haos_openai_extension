@@ -132,7 +132,32 @@ def calculate_history_metrics(
         )
     )
 
+    # Anything outside the observed, valid-state segments is genuinely
+    # unobserved. Split that time between the unknown initial baseline
+    # and later unknown/unavailable intervals, without assuming any
+    # particular device state during either. Work with float timestamps
+    # until the final presentation to avoid adding rounding errors.
+    observed_seconds = sum(total_by_state.values())
+    window_seconds = max(0.0, end_timestamp - start_timestamp)
+    unknown_seconds = max(0.0, window_seconds - observed_seconds)
+    initial_unknown_exact = (
+        0.0 if saw_valid_baseline else max(
+            0.0,
+            min(
+                end_timestamp,
+                first_valid_timestamp
+                if first_valid_timestamp is not None else end_timestamp,
+            ) - start_timestamp,
+        )
+    )
+    unavailable_gap_seconds = max(
+        0.0, unknown_seconds - initial_unknown_exact
+    )
+
     result = {
+        "unknown_duration_seconds": round(unknown_seconds),
+        "unknown_duration_human": format_duration(unknown_seconds),
+        "unavailable_gap_seconds": round(unavailable_gap_seconds),
         "total_observed_duration_by_raw_state": totals,
         "latest_completed_interval_by_raw_state": last_completed,
         "has_unavailable_gaps": had_invalid_gaps,
